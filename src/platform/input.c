@@ -1,16 +1,23 @@
 /**
  * @file input.c
- * @brief Input system - common state management
+ * @brief Input system - fallback implementation for non-Windows platforms
+ *
+ * On Windows, win32_input.c provides the full implementation.
+ * This file provides a fallback for other platforms.
  */
 
 #include <bavarian3d/input.h>
 #include <bavarian3d/memory.h>
+#include <bavarian3d/platform.h>
+
+/* Windows uses win32_input.c instead */
+#ifndef BAV3D_PLATFORM_WINDOWS
 
 /* =============================================================================
  * Internal State
  * ============================================================================= */
 
-#define TEXT_INPUT_BUFFER_SIZE 64
+    #define TEXT_INPUT_BUFFER_SIZE 64
 
 typedef struct InputState
 {
@@ -239,3 +246,5 @@ b8 input_text_input_get(u32* codepoint)
     g_input.text_buffer_tail = (g_input.text_buffer_tail + 1) % TEXT_INPUT_BUFFER_SIZE;
     return true;
 }
+
+#endif /* !BAV3D_PLATFORM_WINDOWS */

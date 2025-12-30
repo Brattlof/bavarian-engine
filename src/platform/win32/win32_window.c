@@ -7,6 +7,7 @@
  * we're mostly ignoring for now because it's a rabbit hole.
  */
 
+#include <bavarian3d/input.h>
 #include <bavarian3d/memory.h>
 #include <bavarian3d/platform.h>
 #include <bavarian3d/window.h>
@@ -15,6 +16,15 @@
 
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
+    #include <windowsx.h> /* For GET_X_LPARAM, GET_Y_LPARAM */
+
+/* Input callback declarations (defined in win32_input.c) */
+extern void win32_input_key_event(WPARAM vk, LPARAM lparam, b8 down);
+extern void win32_input_mouse_button_event(MouseButton button, b8 down);
+extern void win32_input_mouse_move_event(i32 x, i32 y);
+extern void win32_input_mouse_wheel_event(f32 delta, b8 horizontal);
+extern void win32_input_char_event(u32 codepoint);
+extern void win32_input_focus_lost(void);
 
 /* =============================================================================
  * Window State
@@ -66,10 +76,89 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         case WM_KILLFOCUS:
             if (window)
                 window->focused = false;
+            win32_input_focus_lost();
             return 0;
 
         case WM_DESTROY:
             PostQuitMessage(0);
+            return 0;
+
+        /* Keyboard input */
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN:
+            win32_input_key_event(wparam, lparam, true);
+            return 0;
+
+        case WM_KEYUP:
+        case WM_SYSKEYUP:
+            win32_input_key_event(wparam, lparam, false);
+            return 0;
+
+        case WM_CHAR:
+            /* Only process printable characters */
+            if (wparam >= 32 && wparam != 127)
+            {
+                win32_input_char_event((u32)wparam);
+            }
+            return 0;
+
+        /* Mouse input */
+        case WM_MOUSEMOVE:
+            win32_input_mouse_move_event(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam));
+            return 0;
+
+        case WM_LBUTTONDOWN:
+            SetCapture(hwnd);
+            win32_input_mouse_button_event(MOUSE_BUTTON_LEFT, true);
+            return 0;
+
+        case WM_LBUTTONUP:
+            ReleaseCapture();
+            win32_input_mouse_button_event(MOUSE_BUTTON_LEFT, false);
+            return 0;
+
+        case WM_RBUTTONDOWN:
+            SetCapture(hwnd);
+            win32_input_mouse_button_event(MOUSE_BUTTON_RIGHT, true);
+            return 0;
+
+        case WM_RBUTTONUP:
+            ReleaseCapture();
+            win32_input_mouse_button_event(MOUSE_BUTTON_RIGHT, false);
+            return 0;
+
+        case WM_MBUTTONDOWN:
+            SetCapture(hwnd);
+            win32_input_mouse_button_event(MOUSE_BUTTON_MIDDLE, true);
+            return 0;
+
+        case WM_MBUTTONUP:
+            ReleaseCapture();
+            win32_input_mouse_button_event(MOUSE_BUTTON_MIDDLE, false);
+            return 0;
+
+        case WM_XBUTTONDOWN:
+            SetCapture(hwnd);
+            if (GET_XBUTTON_WPARAM(wparam) == XBUTTON1)
+                win32_input_mouse_button_event(MOUSE_BUTTON_4, true);
+            else
+                win32_input_mouse_button_event(MOUSE_BUTTON_5, true);
+            return TRUE;
+
+        case WM_XBUTTONUP:
+            ReleaseCapture();
+            if (GET_XBUTTON_WPARAM(wparam) == XBUTTON1)
+                win32_input_mouse_button_event(MOUSE_BUTTON_4, false);
+            else
+                win32_input_mouse_button_event(MOUSE_BUTTON_5, false);
+            return TRUE;
+
+        case WM_MOUSEWHEEL:
+            win32_input_mouse_wheel_event((f32)GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA, false);
+            return 0;
+
+        case WM_MOUSEHWHEEL:
+            win32_input_mouse_wheel_event((f32)GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA, true);
             return 0;
     }
 

@@ -57,6 +57,14 @@ typedef struct D3D12Backend
     HANDLE fence_event;
     u64 fence_values[D3D12_FRAME_COUNT];
 
+    /* Pipeline state */
+    ID3D12RootSignature* root_signature;
+    ID3D12PipelineState* pipeline_state;
+
+    /* Geometry buffers */
+    ID3D12Resource* vertex_buffer;
+    D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view;
+
     /* State */
     u32 frame_index;
     u32 width;
@@ -87,6 +95,16 @@ void d3d12_backend_resize(D3D12Backend* backend, u32 width, u32 height);
  * ============================================================================= */
 
 void d3d12_backend_clear(D3D12Backend* backend, f32 r, f32 g, f32 b, f32 a);
+
+/* =============================================================================
+ * Pipeline
+ * ============================================================================= */
+
+b8 d3d12_create_triangle_pipeline(D3D12Backend* backend);
+void d3d12_destroy_triangle_pipeline(D3D12Backend* backend);
+b8 d3d12_create_triangle_buffers(D3D12Backend* backend);
+void d3d12_destroy_triangle_buffers(D3D12Backend* backend);
+void d3d12_draw_triangle(D3D12Backend* backend);
 
 #endif /* BAV3D_PLATFORM_WINDOWS */
 

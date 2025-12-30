@@ -24,6 +24,7 @@ if(BAV_ENABLE_D3D12 AND WIN32)
     target_sources(bavarian_renderer_backend PRIVATE
         d3d12/d3d12_device.c
         d3d12/d3d12_commands.c
+        d3d12/d3d12_pipeline.c
     )
     target_compile_definitions(bavarian_renderer_backend PUBLIC BAV3D_D3D12=1)
     # Enable debug layer in debug builds

@@ -131,6 +131,13 @@ extern "C"
      */
     void renderer_clear(Renderer* renderer, f32 r, f32 g, f32 b, f32 a);
 
+    /**
+     * Draw a test triangle.
+     * Temporary function for testing the rendering pipeline.
+     * Must be called between begin_frame and end_frame, after clear.
+     */
+    void renderer_draw_triangle(Renderer* renderer);
+
 #ifdef __cplusplus
 }
 #endif

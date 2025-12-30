@@ -189,6 +189,7 @@ int main(int argc, char** argv)
             f32 b = (sinf(time * 1.1f) + 1.0f) * 0.5f * 0.3f + 0.3f;
 
             renderer_clear(renderer, r, g, b, 1.0f);
+            renderer_draw_triangle(renderer);
             renderer_end_frame(renderer);
         }
 

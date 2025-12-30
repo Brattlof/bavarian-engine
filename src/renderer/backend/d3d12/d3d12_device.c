@@ -286,6 +286,10 @@ b8 d3d12_backend_init(D3D12Backend* backend, HWND hwnd, u32 width, u32 height, b
         goto cleanup;
     if (!create_fence(backend))
         goto cleanup;
+    if (!d3d12_create_triangle_pipeline(backend))
+        goto cleanup;
+    if (!d3d12_create_triangle_buffers(backend))
+        goto cleanup;
 
     backend->initialized = true;
     return true;
@@ -301,6 +305,10 @@ void d3d12_backend_shutdown(D3D12Backend* backend)
         return;
 
     d3d12_backend_wait_idle(backend);
+
+    /* Destroy pipeline and buffers first */
+    d3d12_destroy_triangle_buffers(backend);
+    d3d12_destroy_triangle_pipeline(backend);
 
     if (backend->fence_event)
     {

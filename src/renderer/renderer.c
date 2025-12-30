@@ -293,3 +293,20 @@ void renderer_clear(Renderer* renderer, f32 r, f32 g, f32 b, f32 a)
             break;
     }
 }
+
+void renderer_draw_triangle(Renderer* renderer)
+{
+    if (!renderer)
+        return;
+
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            d3d12_draw_triangle(&renderer->d3d12);
+            break;
+#endif
+        default:
+            break;
+    }
+}

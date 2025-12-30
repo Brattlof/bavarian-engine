@@ -25,6 +25,7 @@ typedef struct Camera
     Mat4 proj_matrix;
     Mat4 view_proj;
     b8 dirty;
+    b8 use_look_at_view; /* If true, view_matrix was set directly by look_at */
 } Camera;
 
 void camera_init(Camera* cam)
@@ -50,12 +51,14 @@ void camera_set_perspective(Camera* cam, f32 fov_y, f32 aspect, f32 near, f32 fa
 void camera_set_position(Camera* cam, Vec3 pos)
 {
     cam->position = pos;
+    cam->use_look_at_view = false; /* Position changed, need to rebuild view */
     cam->dirty = true;
 }
 
 void camera_set_rotation(Camera* cam, Quat rot)
 {
     cam->rotation = rot;
+    cam->use_look_at_view = false; /* Rotation changed, use quaternion view */
     cam->dirty = true;
 }
 
@@ -66,20 +69,33 @@ void camera_look_at(Camera* cam, Vec3 target, Vec3 up)
     Vec3 actual_up = vec3_cross(forward, right);
 
     /*
-     * Building a quaternion from basis vectors is annoying. We could add
-     * mat4_to_quat() but honestly for look_at you usually just want the
-     * matrix anyway. So we're cheating here - just mark dirty and the
-     * view matrix will be built directly from position/target next update.
-     *
-     * This means the rotation quat might be stale. Don't read cam->rotation
-     * after calling look_at and expect it to be correct. If you need the
-     * rotation, compute it yourself from the basis vectors.
+     * Build the view matrix directly. The view matrix is the inverse of the
+     * camera's world transform. For a look-at camera:
+     * - The rotation part transposes the basis vectors into rows
+     * - The translation is the negated position dotted with each basis
      */
-    Mat4 rot_mat = mat4_identity();
-    rot_mat.cols[0] = vec4_from_vec3(right, 0);
-    rot_mat.cols[1] = vec4_from_vec3(actual_up, 0);
-    rot_mat.cols[2] = vec4_from_vec3(vec3_negate(forward), 0);
+    Mat4 view = mat4_identity();
 
+    /* Rotation part (transposed basis vectors as rows) */
+    view.cols[0].x = right.x;
+    view.cols[1].x = right.y;
+    view.cols[2].x = right.z;
+
+    view.cols[0].y = actual_up.x;
+    view.cols[1].y = actual_up.y;
+    view.cols[2].y = actual_up.z;
+
+    view.cols[0].z = -forward.x;
+    view.cols[1].z = -forward.y;
+    view.cols[2].z = -forward.z;
+
+    /* Translation part */
+    view.cols[3].x = -vec3_dot(right, cam->position);
+    view.cols[3].y = -vec3_dot(actual_up, cam->position);
+    view.cols[3].z = vec3_dot(forward, cam->position);
+
+    cam->view_matrix = view;
+    cam->use_look_at_view = true;
     cam->dirty = true;
 }
 
@@ -88,10 +104,14 @@ static void camera_update_matrices(Camera* cam)
     if (!cam->dirty)
         return;
 
-    /* View matrix from position and rotation */
-    Mat4 rot = mat4_from_quat(quat_conjugate(cam->rotation));
-    Mat4 trans = mat4_translate(vec3_negate(cam->position));
-    cam->view_matrix = mat4_mul(rot, trans);
+    /* View matrix - either from look_at or from position/rotation */
+    if (!cam->use_look_at_view)
+    {
+        Mat4 rot = mat4_from_quat(quat_conjugate(cam->rotation));
+        Mat4 trans = mat4_translate(vec3_negate(cam->position));
+        cam->view_matrix = mat4_mul(rot, trans);
+    }
+    /* else: view_matrix was already set by camera_look_at */
 
     /* Projection matrix */
     cam->proj_matrix =

@@ -24,6 +24,40 @@
 #include <math.h>
 #include <stdio.h>
 
+#ifdef _WIN32
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+#endif
+
+/* =============================================================================
+ * Timing (Windows-specific for now)
+ * ============================================================================= */
+
+static f64 g_timer_frequency = 0.0;
+static i64 g_timer_start = 0;
+
+static void timer_init(void)
+{
+#ifdef _WIN32
+    LARGE_INTEGER freq, start;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+    g_timer_frequency = (f64)freq.QuadPart;
+    g_timer_start = start.QuadPart;
+#endif
+}
+
+static f64 timer_get_seconds(void)
+{
+#ifdef _WIN32
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (f64)(now.QuadPart - g_timer_start) / g_timer_frequency;
+#else
+    return 0.0;
+#endif
+}
+
 /* =============================================================================
  * Demo Components
  * ============================================================================= */
@@ -77,6 +111,9 @@ int main(int argc, char** argv)
 
     printf("Bavarian Engine Demo\n");
     printf("====================\n\n");
+
+    /* Initialize high-resolution timer */
+    timer_init();
 
     /* Create window */
     WindowDesc window_desc = {0};
@@ -171,12 +208,13 @@ int main(int argc, char** argv)
     printf("Entities created. Total: %u\n", bav_entity_count(ecs));
     printf("Archetypes: %u\n", bav_archetype_count(ecs));
 
-    /* Initialize camera - pull back to see all cubes */
+    /* Initialize camera - position it to see the cube grid */
     Camera cam;
     camera_init(&cam);
     camera_set_perspective(&cam, math_radians(60.0f),
                            (f32)window_desc.width / (f32)window_desc.height, 0.1f, 100.0f);
-    camera_set_position(&cam, vec3(0.0f, 2.0f, 8.0f));
+    camera_set_position(&cam, vec3(0.0f, 4.0f, 10.0f));
+    camera_look_at(&cam, vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 1.0f, 0.0f));
     printf("Camera initialized\n");
 
     /* Create a cube mesh */
@@ -197,7 +235,7 @@ int main(int argc, char** argv)
 
     /* Create a 3x3 grid of cubes with different colors */
     i32 cube_handles[9];
-    const f32 spacing = 2.0f;
+    const f32 spacing = 2.5f;
 
     /* Color palette for the cubes */
     Material colors[9] = {
@@ -232,17 +270,27 @@ int main(int argc, char** argv)
     printf("\nStarting main loop (press close button or ESC to exit)...\n");
 
     u32 frame_count = 0;
-    const f32 dt = 1.0f / 60.0f;
+    f64 last_time = timer_get_seconds();
+    f64 fps_timer = 0.0;
 
     while (!window_should_close(window))
     {
+        /* Calculate delta time */
+        f64 current_time = timer_get_seconds();
+        f32 dt = (f32)(current_time - last_time);
+        last_time = current_time;
+
+        /* Clamp dt to avoid huge jumps (e.g., when debugging) */
+        if (dt > 0.1f)
+            dt = 0.1f;
+
         window_poll_events();
 
         /* Update ECS */
         bav_systems_update(ecs, dt);
 
         /* Update cube transforms - each cube rotates at a different speed */
-        f32 time = (f32)frame_count * dt;
+        f32 time = (f32)current_time;
         for (i32 i = 0; i < 9; i++)
         {
             RenderObject* obj = scene_get_object(&render_scene, cube_handles[i]);
@@ -254,9 +302,9 @@ int main(int argc, char** argv)
                 f32 z = (row - 1) * spacing;
 
                 /* Each cube has slightly different rotation speed */
-                f32 speed = 0.3f + (f32)i * 0.1f;
+                f32 speed = 0.5f + (f32)i * 0.15f;
                 f32 angle_y = time * speed;
-                f32 angle_x = time * speed * 0.7f;
+                f32 angle_x = time * speed * 0.5f;
 
                 Mat4 trans = mat4_translate(vec3(x, 0.0f, z));
                 Mat4 rot_y = mat4_rotate_y(angle_y);
@@ -269,7 +317,7 @@ int main(int argc, char** argv)
         /* Render */
         if (renderer_begin_frame(renderer))
         {
-            /* Darker background to make cubes pop */
+            /* Dark background */
             renderer_clear(renderer, 0.1f, 0.1f, 0.15f, 1.0f);
 
             /* Set the camera's view-projection matrix on the scene */
@@ -283,19 +331,15 @@ int main(int argc, char** argv)
         }
 
         frame_count++;
+        fps_timer += dt;
 
-        /* Print status every 60 frames */
-        if (frame_count % 60 == 0)
+        /* Print FPS every second */
+        if (fps_timer >= 1.0)
         {
-            printf("Frame %u - Entities: %u, Archetypes: %u, Scene Objects: %u\n", frame_count,
-                   bav_entity_count(ecs), bav_archetype_count(ecs), scene_object_count(&render_scene));
-        }
-
-        /* For automated testing, exit after some frames */
-        if (frame_count >= 600)
-        {
-            printf("Demo complete after %u frames\n", frame_count);
-            break;
+            printf("FPS: %u - Entities: %u, Scene Objects: %u\n", frame_count,
+                   bav_entity_count(ecs), scene_object_count(&render_scene));
+            frame_count = 0;
+            fps_timer = 0.0;
         }
     }
 

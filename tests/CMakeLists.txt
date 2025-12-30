@@ -36,4 +36,15 @@ if(BAV_ARCH_X86_64)
     )
     target_link_libraries(bavarian3d_simd_tests PRIVATE bavarian-runtime)
     add_test(NAME simd_tests COMMAND bavarian3d_simd_tests)
+
+    # SIMD benchmark - verifies SIMD is faster than scalar
+    add_executable(bavarian3d_benchmark
+        test_benchmark.c
+    )
+    target_include_directories(bavarian3d_benchmark PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(bavarian3d_benchmark PRIVATE bavarian-runtime)
 endif()

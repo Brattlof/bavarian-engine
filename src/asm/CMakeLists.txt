@@ -6,10 +6,17 @@
 # ==============================================================================
 
 # Detect assembler and set up assembly sources
-# MSVC requires MASM (.asm) files which we don't have yet - use C fallbacks
+# MSVC can't use GAS syntax .S files, so we use C intrinsics instead
 if(MSVC)
-    set(ASM_SOURCES)
-    message(STATUS "ASM: MSVC detected, using C fallbacks (MASM files not yet available)")
+    if(BAV_ARCH_X86_64)
+        set(ASM_SOURCES
+            x86_64/math_sse_intrin.c
+        )
+        message(STATUS "ASM: MSVC x86_64 using SSE intrinsics")
+    else()
+        set(ASM_SOURCES)
+        message(STATUS "ASM: MSVC non-x86_64, using C fallbacks")
+    endif()
 else()
     # GCC/Clang use GAS syntax (.S files)
     enable_language(ASM)

@@ -24,8 +24,8 @@ target_link_libraries(bavarian3d_tests PRIVATE bavarian-runtime)
 # Register with CTest
 add_test(NAME unit_tests COMMAND bavarian3d_tests)
 
-# Separate test for SIMD code (only when assembly is available - not on MSVC)
-if(BAV3D_ARCH_X86_64 AND NOT MSVC)
+# SIMD tests - now works on MSVC too thanks to intrinsic implementations
+if(BAV_ARCH_X86_64)
     add_executable(bavarian3d_simd_tests
         test_simd.c
     )

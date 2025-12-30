@@ -182,8 +182,18 @@ extern void mat4_transpose_sse(Mat4* result, const Mat4* m);
 
 #elif defined(BAV3D_ARCH_ARM64)
 
-/* NEON implementations - defined in math_neon.S */
-/* TODO: Add NEON function declarations */
+/* NEON implementations - defined in math_neon_intrin.c */
+extern void vec4_add_neon(Vec4* result, const Vec4* a, const Vec4* b);
+extern void vec4_sub_neon(Vec4* result, const Vec4* a, const Vec4* b);
+extern void vec4_mul_neon(Vec4* result, const Vec4* a, const Vec4* b);
+extern void vec4_scale_neon(Vec4* result, const Vec4* v, f32 s);
+extern f32 vec4_dot_neon(const Vec4* a, const Vec4* b);
+extern f32 vec4_length_neon(const Vec4* v);
+extern void vec4_normalize_neon(Vec4* result, const Vec4* v);
+
+extern void mat4_mul_neon(Mat4* result, const Mat4* a, const Mat4* b);
+extern void mat4_mul_vec4_neon(Vec4* result, const Mat4* m, const Vec4* v);
+extern void mat4_transpose_neon(Mat4* result, const Mat4* m);
 
 #endif
 
@@ -308,11 +318,61 @@ void mat4_transpose_fast(Mat4* result, const Mat4* m)
     }
 }
 
+#elif defined(BAV3D_ARCH_ARM64)
+
+/*
+ * ARM64 path - NEON is always available on AArch64, no feature detection needed.
+ */
+
+void vec4_add_fast(Vec4* result, const Vec4* a, const Vec4* b)
+{
+    vec4_add_neon(result, a, b);
+}
+
+void vec4_sub_fast(Vec4* result, const Vec4* a, const Vec4* b)
+{
+    vec4_sub_neon(result, a, b);
+}
+
+void vec4_mul_fast(Vec4* result, const Vec4* a, const Vec4* b)
+{
+    vec4_mul_neon(result, a, b);
+}
+
+f32 vec4_dot_fast(const Vec4* a, const Vec4* b)
+{
+    return vec4_dot_neon(a, b);
+}
+
+f32 vec4_length_fast(const Vec4* v)
+{
+    return vec4_length_neon(v);
+}
+
+void vec4_normalize_fast(Vec4* result, const Vec4* v)
+{
+    vec4_normalize_neon(result, v);
+}
+
+void mat4_mul_fast(Mat4* result, const Mat4* a, const Mat4* b)
+{
+    mat4_mul_neon(result, a, b);
+}
+
+void mat4_mul_vec4_fast(Vec4* result, const Mat4* m, const Vec4* v)
+{
+    mat4_mul_vec4_neon(result, m, v);
+}
+
+void mat4_transpose_fast(Mat4* result, const Mat4* m)
+{
+    mat4_transpose_neon(result, m);
+}
+
 #else
 
 /*
- * Fallback for non-x86 platforms. On ARM64 we'd use NEON, but for now
- * just use the scalar versions. Still fast enough for most use cases.
+ * Fallback for unknown platforms - use scalar implementations.
  */
 
 void vec4_add_fast(Vec4* result, const Vec4* a, const Vec4* b)

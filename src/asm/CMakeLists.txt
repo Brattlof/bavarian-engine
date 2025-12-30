@@ -30,7 +30,7 @@ else()
         message(STATUS "ASM: Using x86_64 SIMD implementations")
     elseif(BAV_ARCH_ARM64)
         set(ASM_SOURCES
-            arm64/math_neon.S
+            arm64/math_neon_intrin.c
             arm64/transform.S
         )
         message(STATUS "ASM: Using ARM64 NEON implementations")

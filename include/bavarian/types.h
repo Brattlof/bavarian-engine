@@ -76,7 +76,12 @@ extern "C"
         u64 value;
     } BavHandle;
 
+/* Compound literals work differently in C vs C++ */
+#ifdef __cplusplus
+#define BAV_HANDLE_NULL (BavHandle{0})
+#else
 #define BAV_HANDLE_NULL ((BavHandle){0})
+#endif
 
     static inline b8 bav_handle_valid(BavHandle h)
     {
@@ -97,7 +102,9 @@ extern "C"
 
     static inline BavHandle bav_handle_make(u32 index, u16 generation, u16 type)
     {
-        return (BavHandle){((u64)index << 32) | ((u64)generation << 16) | (u64)type};
+        BavHandle h;
+        h.value = ((u64)index << 32) | ((u64)generation << 16) | (u64)type;
+        return h;
     }
 
     /* =============================================================================
@@ -163,13 +170,20 @@ extern "C"
      * Static Assertions
      * ============================================================================= */
 
-    _Static_assert(sizeof(i8) == 1, "i8 must be 1 byte");
-    _Static_assert(sizeof(i16) == 2, "i16 must be 2 bytes");
-    _Static_assert(sizeof(i32) == 4, "i32 must be 4 bytes");
-    _Static_assert(sizeof(i64) == 8, "i64 must be 8 bytes");
-    _Static_assert(sizeof(f32) == 4, "f32 must be 4 bytes");
-    _Static_assert(sizeof(f64) == 8, "f64 must be 8 bytes");
-    _Static_assert(sizeof(BavHandle) == 8, "BavHandle must be 8 bytes");
+    /* C++ uses static_assert, C11 uses _Static_assert */
+#ifdef __cplusplus
+#define BAV_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#else
+#define BAV_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#endif
+
+    BAV_STATIC_ASSERT(sizeof(i8) == 1, "i8 must be 1 byte");
+    BAV_STATIC_ASSERT(sizeof(i16) == 2, "i16 must be 2 bytes");
+    BAV_STATIC_ASSERT(sizeof(i32) == 4, "i32 must be 4 bytes");
+    BAV_STATIC_ASSERT(sizeof(i64) == 8, "i64 must be 8 bytes");
+    BAV_STATIC_ASSERT(sizeof(f32) == 4, "f32 must be 4 bytes");
+    BAV_STATIC_ASSERT(sizeof(f64) == 8, "f64 must be 8 bytes");
+    BAV_STATIC_ASSERT(sizeof(BavHandle) == 8, "BavHandle must be 8 bytes");
 
 #ifdef __cplusplus
 }

@@ -24,6 +24,9 @@ add_library(bavarian_scripting OBJECT
     compiler/analyzer.c
     compiler/codegen.c
 
+    # Virtual machine
+    vm/vm.c
+
     # Lua bindings (existing files)
     lua_bindings.c
     lua_math.c

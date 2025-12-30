@@ -5,6 +5,7 @@ add_library(bavarian_renderer_frontend OBJECT
     mesh.c
     material.c
     commands.c
+    ecs_render.c
 )
 
 target_include_directories(bavarian_renderer_frontend PUBLIC

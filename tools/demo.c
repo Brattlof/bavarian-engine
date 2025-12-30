@@ -1,37 +1,31 @@
 /**
  * @file demo.c
- * @brief Bavarian Engine Demo Application
+ * @brief Bavarian Engine Demo - ECS Rendering
  *
- * Simple demonstration of the engine's core systems:
+ * Demonstrates:
  * - Platform layer (window, input, timing)
- * - Entity Component System
- * - Renderer with scene management
- * - Memory management
+ * - Entity Component System with ECS-driven rendering
+ * - D3D12 renderer
  */
 
 #include <bavarian3d/arena.h>
 #include <bavarian3d/camera.h>
+#include <bavarian3d/ecs_render.h>
 #include <bavarian3d/material.h>
 #include <bavarian3d/math.h>
 #include <bavarian3d/memory.h>
 #include <bavarian3d/mesh.h>
 #include <bavarian3d/renderer.h>
-#include <bavarian3d/scene.h>
 #include <bavarian3d/types.h>
 #include <bavarian3d/window.h>
 
 #include <bavarian/ecs.h>
-#include <math.h>
 #include <stdio.h>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
 #endif
-
-/* =============================================================================
- * Timing (Windows-specific for now)
- * ============================================================================= */
 
 static f64 g_timer_frequency = 0.0;
 static i64 g_timer_start = 0;
@@ -58,300 +52,126 @@ static f64 timer_get_seconds(void)
 #endif
 }
 
-/* =============================================================================
- * Demo Components
- * ============================================================================= */
-
-typedef struct Transform
-{
-    Vec3 position;
-    Quat rotation;
-    Vec3 scale;
-} Transform;
-
-typedef struct Velocity
-{
-    Vec3 linear;
-    Vec3 angular;
-} Velocity;
-
-typedef struct RenderMeshComp
-{
-    u32 mesh_id;
-    u32 material_id;
-} RenderMeshComp;
-
-/* =============================================================================
- * Demo Systems
- * ============================================================================= */
+typedef struct RotationSpeed { f32 speed_y; f32 speed_x; } RotationSpeed;
 
 static BavComponentId g_transform_id;
-static BavComponentId g_velocity_id;
+static BavComponentId g_mesh_renderer_id;
+static BavComponentId g_rotation_speed_id;
 
-static void physics_system(BavEntityAdmin* admin, f32 dt, void* user_data)
+typedef struct AnimCtx { f32 time; } AnimCtx;
+
+static void rotation_callback(BavEntity entity, void** components, void* user_data)
 {
-    (void)user_data;
-
-    BavComponentId required[] = {g_transform_id, g_velocity_id};
-    BavQuery query = bav_query_require(required, 2);
-
-    u32 count = bav_query_count(admin, &query);
-    (void)count;
-    (void)dt;
+    (void)entity;
+    AnimCtx* ctx = (AnimCtx*)user_data;
+    LocalTransform* t = (LocalTransform*)components[0];
+    RotationSpeed* rs = (RotationSpeed*)components[1];
+    Quat ry = quat_from_axis_angle(vec3(0, 1, 0), ctx->time * rs->speed_y);
+    Quat rx = quat_from_axis_angle(vec3(1, 0, 0), ctx->time * rs->speed_x);
+    t->rotation = quat_mul(ry, rx);
 }
 
-/* =============================================================================
- * Main
- * ============================================================================= */
+static void animate_entities(BavEntityAdmin* admin, f32 time)
+{
+    BavComponentId req[] = {g_transform_id, g_rotation_speed_id};
+    BavQuery query = bav_query_require(req, 2);
+    AnimCtx ctx = {time};
+    bav_query_each_fast(admin, &query, rotation_callback, &ctx);
+}
 
 int main(int argc, char** argv)
 {
-    (void)argc;
-    (void)argv;
-
-    printf("Bavarian Engine Demo\n");
-    printf("====================\n\n");
-
-    /* Initialize high-resolution timer */
+    (void)argc; (void)argv;
+    printf("Bavarian Engine Demo - ECS Rendering\n====================================\n\n");
     timer_init();
 
-    /* Create window */
-    WindowDesc window_desc = {0};
-    window_desc.title = "Bavarian Engine Demo";
-    window_desc.width = 1280;
-    window_desc.height = 720;
-    window_desc.resizable = true;
+    WindowDesc wd = {0};
+    wd.title = "Bavarian Engine - ECS Rendering";
+    wd.width = 1280; wd.height = 720; wd.resizable = true;
 
-    Window* window = window_create(&window_desc);
-    if (!window)
-    {
-        printf("ERROR: Failed to create window\n");
-        return 1;
-    }
-    printf("Window created: %dx%d\n", window_desc.width, window_desc.height);
+    Window* window = window_create(&wd);
+    if (!window) { printf("ERROR: window\n"); return 1; }
+    printf("Window: %dx%d\n", wd.width, wd.height);
 
-    /* Create renderer */
-    RendererConfig render_config = {0};
-    render_config.backend = RENDERER_BACKEND_D3D12;
-    render_config.enable_vsync = true;
-    render_config.max_frames_in_flight = 2;
-    render_config.window_handle = window_get_native_handle(window);
+    RendererConfig rc = {0};
+    rc.backend = RENDERER_BACKEND_D3D12;
+    rc.enable_vsync = true;
+    rc.max_frames_in_flight = 2;
+    rc.window_handle = window_get_native_handle(window);
 
-    Renderer* renderer = renderer_create(&render_config);
-    if (!renderer)
-    {
-        printf("ERROR: Failed to create renderer\n");
-        window_destroy(window);
-        return 1;
-    }
-    printf("Renderer initialized: %s\n",
-           renderer_get_backend(renderer) == RENDERER_BACKEND_D3D12 ? "D3D12" : "Software");
+    Renderer* renderer = renderer_create(&rc);
+    if (!renderer) { printf("ERROR: renderer\n"); window_destroy(window); return 1; }
+    printf("Renderer: D3D12\n");
 
-    /* Create ECS */
     BavEntityAdmin* ecs = bav_entity_admin_create(NULL);
-    if (!ecs)
-    {
-        printf("ERROR: Failed to create ECS\n");
-        renderer_destroy(renderer);
-        window_destroy(window);
-        return 1;
-    }
+    if (!ecs) { printf("ERROR: ecs\n"); renderer_destroy(renderer); window_destroy(window); return 1; }
+
+    if (!ecs_render_register_components(ecs, &g_transform_id, &g_mesh_renderer_id))
+    { printf("ERROR: components\n"); bav_entity_admin_destroy(ecs); renderer_destroy(renderer); window_destroy(window); return 1; }
+
+    g_rotation_speed_id = BAV_REGISTER_COMPONENT(ecs, RotationSpeed);
     printf("ECS initialized\n");
 
-    /* Register components */
-    g_transform_id = BAV_REGISTER_COMPONENT(ecs, Transform);
-    g_velocity_id = BAV_REGISTER_COMPONENT(ecs, Velocity);
-    BavComponentId mesh_id = BAV_REGISTER_COMPONENT(ecs, RenderMeshComp);
-    printf("Components registered: Transform, Velocity, RenderMeshComp\n");
+    Mesh* cube = mesh_create_cube();
+    if (!cube) { printf("ERROR: mesh\n"); bav_entity_admin_destroy(ecs); renderer_destroy(renderer); window_destroy(window); return 1; }
+    printf("Cube: %u verts, %u indices\n", cube->vertex_count, cube->index_count);
 
-    /* Register systems */
-    BavSystemDef physics_def = {0};
-    physics_def.name = "Physics";
-    physics_def.update = physics_system;
-    physics_def.priority = 0;
-    bav_system_register(ecs, &physics_def);
-    printf("Systems registered: Physics\n");
+    const f32 spacing = 2.5f;
+    Vec4 colors[9] = {{1,0.3f,0.3f,1},{0.3f,1,0.3f,1},{0.3f,0.3f,1,1},{1,1,0.3f,1},{1,0.3f,1,1},{0.3f,1,1,1},{1,0.6f,0.3f,1},{0.6f,0.3f,1,1},{1,1,1,1}};
 
-    /* Create some entities */
-    const u32 ENTITY_COUNT = 1000;
-    printf("Creating %u entities...\n", ENTITY_COUNT);
-
-    for (u32 i = 0; i < ENTITY_COUNT; i++)
-    {
-        BavEntity e = bav_entity_create(ecs);
-
-        Transform t = {0};
-        t.position.x = (f32)(i % 100);
-        t.position.y = 0.0f;
-        t.position.z = (f32)(i / 100);
-        t.rotation = quat_identity();
-        t.scale.x = t.scale.y = t.scale.z = 1.0f;
-
-        Velocity v = {0};
-        v.linear.x = 0.0f;
-        v.linear.y = 0.0f;
-        v.linear.z = 1.0f;
-
-        bav_entity_add_component(ecs, e, g_transform_id, &t);
-        bav_entity_add_component(ecs, e, g_velocity_id, &v);
-
-        if (i % 2 == 0)
-        {
-            RenderMeshComp rm = {0};
-            rm.mesh_id = 1;
-            rm.material_id = i % 10;
-            bav_entity_add_component(ecs, e, mesh_id, &rm);
+    printf("Creating 9 entities...\n");
+    for (i32 r = 0; r < 3; r++) {
+        for (i32 c = 0; c < 3; c++) {
+            i32 idx = r * 3 + c;
+            f32 x = (f32)(c - 1) * spacing;
+            f32 z = (f32)(r - 1) * spacing;
+            BavEntity e = bav_entity_create(ecs);
+            LocalTransform t = local_transform_from_position(vec3(x, 0, z));
+            bav_entity_add_component(ecs, e, g_transform_id, &t);
+            Material mat = material_default(); mat.base_color = colors[idx];
+            MeshRenderer mr = mesh_renderer_create(cube, mat);
+            bav_entity_add_component(ecs, e, g_mesh_renderer_id, &mr);
+            RotationSpeed rs = {0.5f + (f32)idx * 0.15f, 0};
+            rs.speed_x = rs.speed_y * 0.5f;
+            bav_entity_add_component(ecs, e, g_rotation_speed_id, &rs);
         }
     }
     bav_entity_admin_flush(ecs);
+    printf("Entities: %u, Archetypes: %u\n", bav_entity_count(ecs), bav_archetype_count(ecs));
 
-    printf("Entities created. Total: %u\n", bav_entity_count(ecs));
-    printf("Archetypes: %u\n", bav_archetype_count(ecs));
-
-    /* Initialize camera - position it to see the cube grid */
     Camera cam;
     camera_init(&cam);
-    camera_set_perspective(&cam, math_radians(60.0f),
-                           (f32)window_desc.width / (f32)window_desc.height, 0.1f, 100.0f);
-    camera_set_position(&cam, vec3(0.0f, 4.0f, 10.0f));
-    camera_look_at(&cam, vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 1.0f, 0.0f));
-    printf("Camera initialized\n");
+    camera_set_perspective(&cam, math_radians(60.0f), (f32)wd.width / (f32)wd.height, 0.1f, 100.0f);
+    camera_set_position(&cam, vec3(0, 4, 10));
+    camera_look_at(&cam, vec3(0, 0, 0), vec3(0, 1, 0));
 
-    /* Create a cube mesh */
-    Mesh* cube = mesh_create_cube();
-    if (!cube)
-    {
-        printf("ERROR: Failed to create cube mesh\n");
-        bav_entity_admin_destroy(ecs);
-        renderer_destroy(renderer);
-        window_destroy(window);
-        return 1;
-    }
-    printf("Cube mesh created: %u vertices, %u indices\n", cube->vertex_count, cube->index_count);
+    EcsRenderContext render_ctx;
+    ecs_render_init(&render_ctx, renderer, g_transform_id, g_mesh_renderer_id);
+    printf("ECS render ready\n\nMain loop...\n");
 
-    /* Create a render scene with multiple cubes */
-    Scene render_scene;
-    scene_init(&render_scene);
+    u32 fc = 0; f64 lt = timer_get_seconds(), ft = 0;
 
-    /* Create a 3x3 grid of cubes with different colors */
-    i32 cube_handles[9];
-    const f32 spacing = 2.5f;
-
-    /* Color palette for the cubes */
-    Material colors[9] = {
-        {{1.0f, 0.3f, 0.3f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Red */
-        {{0.3f, 1.0f, 0.3f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Green */
-        {{0.3f, 0.3f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Blue */
-        {{1.0f, 1.0f, 0.3f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Yellow */
-        {{1.0f, 0.3f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Magenta */
-        {{0.3f, 1.0f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Cyan */
-        {{1.0f, 0.6f, 0.3f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Orange */
-        {{0.6f, 0.3f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Purple */
-        {{1.0f, 1.0f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* White */
-    };
-
-    for (i32 row = 0; row < 3; row++)
-    {
-        for (i32 col = 0; col < 3; col++)
-        {
-            i32 idx = row * 3 + col;
-            f32 x = (col - 1) * spacing;
-            f32 y = 0.0f;
-            f32 z = (row - 1) * spacing;
-
-            Mat4 transform = mat4_translate(vec3(x, y, z));
-            cube_handles[idx] = scene_add_object(&render_scene, cube, &colors[idx], &transform);
-        }
-    }
-
-    printf("Scene created with %u objects\n", scene_object_count(&render_scene));
-
-    /* Main loop */
-    printf("\nStarting main loop (press close button or ESC to exit)...\n");
-
-    u32 frame_count = 0;
-    f64 last_time = timer_get_seconds();
-    f64 fps_timer = 0.0;
-
-    while (!window_should_close(window))
-    {
-        /* Calculate delta time */
-        f64 current_time = timer_get_seconds();
-        f32 dt = (f32)(current_time - last_time);
-        last_time = current_time;
-
-        /* Clamp dt to avoid huge jumps (e.g., when debugging) */
-        if (dt > 0.1f)
-            dt = 0.1f;
-
+    while (!window_should_close(window)) {
+        f64 ct = timer_get_seconds();
+        f32 dt = (f32)(ct - lt); lt = ct;
+        if (dt > 0.1f) dt = 0.1f;
         window_poll_events();
-
-        /* Update ECS */
-        bav_systems_update(ecs, dt);
-
-        /* Update cube transforms - each cube rotates at a different speed */
-        f32 time = (f32)current_time;
-        for (i32 i = 0; i < 9; i++)
-        {
-            RenderObject* obj = scene_get_object(&render_scene, cube_handles[i]);
-            if (obj)
-            {
-                i32 row = i / 3;
-                i32 col = i % 3;
-                f32 x = (col - 1) * spacing;
-                f32 z = (row - 1) * spacing;
-
-                /* Each cube has slightly different rotation speed */
-                f32 speed = 0.5f + (f32)i * 0.15f;
-                f32 angle_y = time * speed;
-                f32 angle_x = time * speed * 0.5f;
-
-                Mat4 trans = mat4_translate(vec3(x, 0.0f, z));
-                Mat4 rot_y = mat4_rotate_y(angle_y);
-                Mat4 rot_x = mat4_rotate_x(angle_x);
-                Mat4 rot = mat4_mul(rot_y, rot_x);
-                obj->transform = mat4_mul(trans, rot);
-            }
-        }
-
-        /* Render */
-        if (renderer_begin_frame(renderer))
-        {
-            /* Dark background */
+        animate_entities(ecs, (f32)ct);
+        if (renderer_begin_frame(renderer)) {
             renderer_clear(renderer, 0.1f, 0.1f, 0.15f, 1.0f);
-
-            /* Set the camera's view-projection matrix on the scene */
-            Mat4 view_proj = camera_get_view_projection(&cam);
-            scene_set_camera(&render_scene, &view_proj);
-
-            /* Render all objects in the scene */
-            renderer_draw_scene(renderer, &render_scene);
-
+            Mat4 vp = camera_get_view_projection(&cam);
+            ecs_render_draw(&render_ctx, ecs, &vp);
             renderer_end_frame(renderer);
         }
-
-        frame_count++;
-        fps_timer += dt;
-
-        /* Print FPS every second */
-        if (fps_timer >= 1.0)
-        {
-            printf("FPS: %u - Entities: %u, Scene Objects: %u\n", frame_count,
-                   bav_entity_count(ecs), scene_object_count(&render_scene));
-            frame_count = 0;
-            fps_timer = 0.0;
-        }
+        fc++; ft += dt;
+        if (ft >= 1.0) { printf("FPS: %u, Entities: %u\n", fc, bav_entity_count(ecs)); fc = 0; ft = 0; }
     }
 
-    /* Cleanup */
-    printf("\nShutting down...\n");
-    scene_clear(&render_scene);
-    renderer_destroy_mesh(renderer);
+    printf("\nShutdown...\n");
     mesh_destroy(cube);
     bav_entity_admin_destroy(ecs);
     renderer_destroy(renderer);
     window_destroy(window);
-    printf("Demo finished.\n");
-
+    printf("Done.\n");
     return 0;
 }

@@ -760,6 +760,38 @@ f32 quat_dot(Quat a, Quat b)
     return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
 }
 
+Mat4 quat_to_mat4(Quat q)
+{
+    f32 x = q.x, y = q.y, z = q.z, w = q.w;
+    f32 x2 = x + x, y2 = y + y, z2 = z + z;
+    f32 xx = x * x2, xy = x * y2, xz = x * z2;
+    f32 yy = y * y2, yz = y * z2, zz = z * z2;
+    f32 wx = w * x2, wy = w * y2, wz = w * z2;
+
+    Mat4 m;
+    /* Column 0 */
+    m.cols[0].x = 1.0f - (yy + zz);
+    m.cols[0].y = xy + wz;
+    m.cols[0].z = xz - wy;
+    m.cols[0].w = 0.0f;
+    /* Column 1 */
+    m.cols[1].x = xy - wz;
+    m.cols[1].y = 1.0f - (xx + zz);
+    m.cols[1].z = yz + wx;
+    m.cols[1].w = 0.0f;
+    /* Column 2 */
+    m.cols[2].x = xz + wy;
+    m.cols[2].y = yz - wx;
+    m.cols[2].z = 1.0f - (xx + yy);
+    m.cols[2].w = 0.0f;
+    /* Column 3 - no translation */
+    m.cols[3].x = 0.0f;
+    m.cols[3].y = 0.0f;
+    m.cols[3].z = 0.0f;
+    m.cols[3].w = 1.0f;
+    return m;
+}
+
 Vec3 quat_rotate_vec3(Quat q, Vec3 v)
 {
     Vec3 qv = vec3(q.x, q.y, q.z);

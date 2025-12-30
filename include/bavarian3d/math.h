@@ -350,6 +350,7 @@ extern "C"
     Vec3 quat_rotate_vec3(Quat q, Vec3 v);
     Quat quat_slerp(Quat a, Quat b, f32 t);
     f32 quat_dot(Quat a, Quat b);
+    Mat4 quat_to_mat4(Quat q);
 
     /* =============================================================================
      * Geometric Functions

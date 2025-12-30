@@ -18,6 +18,7 @@ add_library(bavarian_ecs OBJECT
     query.c
     system.c
     admin.c
+    ecs_iterate_fast.c
 )
 
 target_include_directories(bavarian_ecs PUBLIC

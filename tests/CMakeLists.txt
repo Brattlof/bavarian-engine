@@ -48,3 +48,14 @@ if(BAV_ARCH_X86_64)
     )
     target_link_libraries(bavarian3d_benchmark PRIVATE bavarian-runtime)
 endif()
+
+# ECS benchmark - verifies optimized iteration is faster than standard
+add_executable(bavarian3d_ecs_benchmark
+    test_ecs_benchmark.c
+)
+target_include_directories(bavarian3d_ecs_benchmark PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(bavarian3d_ecs_benchmark PRIVATE bavarian-runtime)

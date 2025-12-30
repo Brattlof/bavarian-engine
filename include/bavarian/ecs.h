@@ -359,6 +359,31 @@ extern "C"
     u32 bav_query_count(BavEntityAdmin* admin, const BavQuery* query);
 
     /* =============================================================================
+     * Optimized Iteration (SIMD/Prefetch-accelerated)
+     * ============================================================================= */
+
+    /**
+     * Optimized iteration over a single archetype.
+     * Uses prefetching and cache-friendly access patterns.
+     */
+    void ecs_iterate_archetype_fast(BavArchetype* arch, const u32* arch_indices,
+                                    const usize* component_sizes, u32 query_comp_count,
+                                    BavQueryCallback callback, void* user_data);
+
+    /**
+     * Optimized query iteration with prefetching.
+     * Drop-in replacement for bav_query_each with better cache behavior.
+     */
+    void bav_query_each_fast(BavEntityAdmin* admin, const BavQuery* query, BavQueryCallback callback,
+                             void* user_data);
+
+    /**
+     * Optimized batch iteration with prefetching.
+     */
+    void bav_query_batch_fast(BavEntityAdmin* admin, const BavQuery* query,
+                              BavQueryBatchCallback callback, void* user_data);
+
+    /* =============================================================================
      * System Registration (Optional Higher-Level API)
      * ============================================================================= */
 

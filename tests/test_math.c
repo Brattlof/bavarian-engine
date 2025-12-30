@@ -135,6 +135,94 @@ static void test_mat4_inverse(void)
 }
 
 /* =============================================================================
+ * Mat3 Tests
+ * ============================================================================= */
+
+static void test_mat3_identity(void)
+{
+    Mat3 m = mat3_identity();
+
+    ASSERT_FLOAT_EQ(m.cols[0].x, 1.0f, EPSILON);
+    ASSERT_FLOAT_EQ(m.cols[1].y, 1.0f, EPSILON);
+    ASSERT_FLOAT_EQ(m.cols[2].z, 1.0f, EPSILON);
+
+    /* Off-diagonal should be zero */
+    ASSERT_FLOAT_EQ(m.cols[0].y, 0.0f, EPSILON);
+    ASSERT_FLOAT_EQ(m.cols[1].x, 0.0f, EPSILON);
+    TEST_PASS();
+}
+
+static void test_mat3_mul_identity(void)
+{
+    Mat3 a = mat3_rotate(0.5f);
+    Mat3 i = mat3_identity();
+    Mat3 r = mat3_mul(a, i);
+
+    /* Multiplying by identity should give the same matrix */
+    for (int col = 0; col < 3; col++)
+    {
+        ASSERT_FLOAT_EQ(r.cols[col].x, a.cols[col].x, EPSILON);
+        ASSERT_FLOAT_EQ(r.cols[col].y, a.cols[col].y, EPSILON);
+        ASSERT_FLOAT_EQ(r.cols[col].z, a.cols[col].z, EPSILON);
+    }
+    TEST_PASS();
+}
+
+static void test_mat3_mul_vec3(void)
+{
+    /* Rotate 90 degrees around Z axis: (1,0,0) -> (0,1,0) */
+    Mat3 r = mat3_rotate(MATH_PI_HALF);
+    Vec3 v = vec3(1, 0, 0);
+    Vec3 result = mat3_mul_vec3(r, v);
+
+    ASSERT_FLOAT_EQ(result.x, 0.0f, EPSILON);
+    ASSERT_FLOAT_EQ(result.y, 1.0f, EPSILON);
+    ASSERT_FLOAT_EQ(result.z, 0.0f, EPSILON);
+    TEST_PASS();
+}
+
+static void test_mat3_inverse(void)
+{
+    Mat3 r = mat3_rotate(0.7f);
+    Mat3 inv = mat3_inverse(r);
+    Mat3 result = mat3_mul(r, inv);
+
+    /* Should be identity */
+    ASSERT_FLOAT_EQ(result.cols[0].x, 1.0f, EPSILON);
+    ASSERT_FLOAT_EQ(result.cols[1].y, 1.0f, EPSILON);
+    ASSERT_FLOAT_EQ(result.cols[2].z, 1.0f, EPSILON);
+    ASSERT_FLOAT_EQ(result.cols[0].y, 0.0f, EPSILON);
+    ASSERT_FLOAT_EQ(result.cols[1].x, 0.0f, EPSILON);
+    TEST_PASS();
+}
+
+static void test_mat3_determinant(void)
+{
+    /* Rotation matrices have determinant 1 */
+    Mat3 r = mat3_rotate(1.23f);
+    ASSERT_FLOAT_EQ(mat3_determinant(r), 1.0f, EPSILON);
+
+    /* Scale matrix has determinant = product of scale factors */
+    Mat3 s = mat3_scale(vec2(2, 3));
+    ASSERT_FLOAT_EQ(mat3_determinant(s), 6.0f, EPSILON);
+
+    TEST_PASS();
+}
+
+static void test_mat3_from_mat4(void)
+{
+    Mat4 m4 = mat4_rotate_z(0.5f);
+    Mat3 m3 = mat3_from_mat4(m4);
+
+    /* Upper-left 3x3 should match */
+    ASSERT_FLOAT_EQ(m3.cols[0].x, m4.cols[0].x, EPSILON);
+    ASSERT_FLOAT_EQ(m3.cols[0].y, m4.cols[0].y, EPSILON);
+    ASSERT_FLOAT_EQ(m3.cols[1].x, m4.cols[1].x, EPSILON);
+    ASSERT_FLOAT_EQ(m3.cols[1].y, m4.cols[1].y, EPSILON);
+    TEST_PASS();
+}
+
+/* =============================================================================
  * Quaternion Tests
  * ============================================================================= */
 
@@ -178,6 +266,12 @@ void test_math_suite(void)
     RUN_TEST(test_mat4_mul_identity);
     RUN_TEST(test_mat4_translate);
     RUN_TEST(test_mat4_inverse);
+    RUN_TEST(test_mat3_identity);
+    RUN_TEST(test_mat3_mul_identity);
+    RUN_TEST(test_mat3_mul_vec3);
+    RUN_TEST(test_mat3_inverse);
+    RUN_TEST(test_mat3_determinant);
+    RUN_TEST(test_mat3_from_mat4);
     RUN_TEST(test_quat_identity);
     RUN_TEST(test_quat_rotate_vec3);
 

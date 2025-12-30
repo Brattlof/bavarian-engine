@@ -267,6 +267,145 @@ Vec4 vec4_lerp(Vec4 a, Vec4 b, f32 t)
 }
 
 /* =============================================================================
+ * Mat3 Functions
+ * ============================================================================= */
+
+Mat3 mat3_identity(void)
+{
+    Mat3 m = {0};
+    m.cols[0] = vec4(1, 0, 0, 0);
+    m.cols[1] = vec4(0, 1, 0, 0);
+    m.cols[2] = vec4(0, 0, 1, 0);
+    return m;
+}
+
+Mat3 mat3_zero(void)
+{
+    Mat3 m = {0};
+    return m;
+}
+
+Mat3 mat3_mul(Mat3 a, Mat3 b)
+{
+    Mat3 result;
+
+    for (int col = 0; col < 3; col++)
+    {
+        result.cols[col] = vec4(
+            a.cols[0].x * b.cols[col].x + a.cols[1].x * b.cols[col].y + a.cols[2].x * b.cols[col].z,
+
+            a.cols[0].y * b.cols[col].x + a.cols[1].y * b.cols[col].y + a.cols[2].y * b.cols[col].z,
+
+            a.cols[0].z * b.cols[col].x + a.cols[1].z * b.cols[col].y + a.cols[2].z * b.cols[col].z,
+
+            0);
+    }
+
+    return result;
+}
+
+Vec3 mat3_mul_vec3(Mat3 m, Vec3 v)
+{
+    return vec3(m.cols[0].x * v.x + m.cols[1].x * v.y + m.cols[2].x * v.z,
+                m.cols[0].y * v.x + m.cols[1].y * v.y + m.cols[2].y * v.z,
+                m.cols[0].z * v.x + m.cols[1].z * v.y + m.cols[2].z * v.z);
+}
+
+Mat3 mat3_transpose(Mat3 m)
+{
+    Mat3 result;
+    result.cols[0] = vec4(m.cols[0].x, m.cols[1].x, m.cols[2].x, 0);
+    result.cols[1] = vec4(m.cols[0].y, m.cols[1].y, m.cols[2].y, 0);
+    result.cols[2] = vec4(m.cols[0].z, m.cols[1].z, m.cols[2].z, 0);
+    return result;
+}
+
+f32 mat3_determinant(Mat3 m)
+{
+    f32 a = m.cols[0].x, b = m.cols[1].x, c = m.cols[2].x;
+    f32 d = m.cols[0].y, e = m.cols[1].y, f = m.cols[2].y;
+    f32 g = m.cols[0].z, h = m.cols[1].z, i = m.cols[2].z;
+
+    return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+}
+
+Mat3 mat3_inverse(Mat3 m)
+{
+    f32 a = m.cols[0].x, b = m.cols[1].x, c = m.cols[2].x;
+    f32 d = m.cols[0].y, e = m.cols[1].y, f = m.cols[2].y;
+    f32 g = m.cols[0].z, h = m.cols[1].z, i = m.cols[2].z;
+
+    f32 det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+
+    if (math_abs(det) < MATH_EPSILON)
+    {
+        return mat3_identity(); /* Singular matrix, bail out */
+    }
+
+    f32 inv_det = 1.0f / det;
+
+    Mat3 result;
+    result.cols[0] =
+        vec4((e * i - f * h) * inv_det, (f * g - d * i) * inv_det, (d * h - e * g) * inv_det, 0);
+    result.cols[1] =
+        vec4((c * h - b * i) * inv_det, (a * i - c * g) * inv_det, (b * g - a * h) * inv_det, 0);
+    result.cols[2] =
+        vec4((b * f - c * e) * inv_det, (c * d - a * f) * inv_det, (a * e - b * d) * inv_det, 0);
+
+    return result;
+}
+
+Mat3 mat3_from_mat4(Mat4 m)
+{
+    Mat3 result;
+    result.cols[0] = vec4(m.cols[0].x, m.cols[0].y, m.cols[0].z, 0);
+    result.cols[1] = vec4(m.cols[1].x, m.cols[1].y, m.cols[1].z, 0);
+    result.cols[2] = vec4(m.cols[2].x, m.cols[2].y, m.cols[2].z, 0);
+    return result;
+}
+
+Mat3 mat3_normal_matrix(Mat4 m)
+{
+    /*
+     * Normal vectors need to be transformed by the inverse-transpose of the
+     * model matrix. This matters when you have non-uniform scaling - if you
+     * just use the regular matrix your normals get skewed and lighting looks
+     * like garbage.
+     */
+    Mat3 upper = mat3_from_mat4(m);
+    return mat3_transpose(mat3_inverse(upper));
+}
+
+Mat3 mat3_scale(Vec2 scale)
+{
+    Mat3 m = mat3_identity();
+    m.cols[0].x = scale.x;
+    m.cols[1].y = scale.y;
+    return m;
+}
+
+Mat3 mat3_rotate(f32 radians)
+{
+    f32 c = math_cos(radians);
+    f32 s = math_sin(radians);
+
+    Mat3 m = mat3_identity();
+    m.cols[0].x = c;
+    m.cols[0].y = s;
+    m.cols[1].x = -s;
+    m.cols[1].y = c;
+    return m;
+}
+
+Mat3 mat3_translate_2d(Vec2 t)
+{
+    Mat3 m = mat3_identity();
+    m.cols[2].x = t.x;
+    m.cols[2].y = t.y;
+    return m;
+}
+
+/* =============================================================================
  * Mat4 Functions
  * ============================================================================= */
 

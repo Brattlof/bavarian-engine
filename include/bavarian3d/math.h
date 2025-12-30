@@ -284,6 +284,23 @@ extern "C"
     Vec4 vec4_lerp(Vec4 a, Vec4 b, f32 t);
 
     /* =============================================================================
+     * Mat3 Functions
+     * ============================================================================= */
+
+    Mat3 mat3_identity(void);
+    Mat3 mat3_zero(void);
+    Mat3 mat3_mul(Mat3 a, Mat3 b);
+    Vec3 mat3_mul_vec3(Mat3 m, Vec3 v);
+    Mat3 mat3_transpose(Mat3 m);
+    f32 mat3_determinant(Mat3 m);
+    Mat3 mat3_inverse(Mat3 m);
+    Mat3 mat3_from_mat4(Mat4 m);     /* Extract upper-left 3x3 */
+    Mat3 mat3_normal_matrix(Mat4 m); /* Inverse-transpose for normals */
+    Mat3 mat3_scale(Vec2 scale);
+    Mat3 mat3_rotate(f32 radians);  /* 2D rotation */
+    Mat3 mat3_translate_2d(Vec2 t); /* 2D translation (homogeneous) */
+
+    /* =============================================================================
      * Mat4 Functions
      * ============================================================================= */
 

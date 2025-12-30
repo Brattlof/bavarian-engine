@@ -29,22 +29,28 @@ b8 d3d12_create_triangle_pipeline(D3D12Backend* backend)
     HRESULT hr;
 
     /*
-     * Root signature with two CBVs:
-     * - b0: Transform buffer (MVP matrix) - vertex shader
-     * - b1: Material buffer - pixel shader
+     * Root signature with inline root constants:
+     * - Slot 0: Transform (MVP matrix) - 16 floats = 16 DWORDs - vertex shader
+     * - Slot 1: Material - 8 floats = 8 DWORDs - pixel shader
+     *
+     * Using root constants instead of CBVs so each draw call gets its own
+     * copy of the constant data embedded in the command list. This allows
+     * multiple draws with different transforms/materials in a single frame.
      */
     D3D12_ROOT_PARAMETER root_params[2] = {0};
 
-    /* Transform CBV at b0 */
-    root_params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    root_params[0].Descriptor.ShaderRegister = 0; /* b0 */
-    root_params[0].Descriptor.RegisterSpace = 0;
+    /* Transform root constants at b0 (16 floats for 4x4 matrix) */
+    root_params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    root_params[0].Constants.ShaderRegister = 0; /* b0 */
+    root_params[0].Constants.RegisterSpace = 0;
+    root_params[0].Constants.Num32BitValues = 16; /* 4x4 matrix */
     root_params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 
-    /* Material CBV at b1 */
-    root_params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    root_params[1].Descriptor.ShaderRegister = 1; /* b1 */
-    root_params[1].Descriptor.RegisterSpace = 0;
+    /* Material root constants at b1 (8 floats) */
+    root_params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    root_params[1].Constants.ShaderRegister = 1; /* b1 */
+    root_params[1].Constants.RegisterSpace = 0;
+    root_params[1].Constants.Num32BitValues = 8; /* base_color + metallic + roughness + emission + pad */
     root_params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_ROOT_SIGNATURE_DESC root_sig_desc = {0};
@@ -359,19 +365,20 @@ void d3d12_destroy_constant_buffers(D3D12Backend* backend)
 
 void d3d12_set_transform(D3D12Backend* backend, const float* mvp)
 {
-    if (!backend->constant_buffer_mapped[backend->frame_index])
+    if (!mvp)
         return;
 
-    memcpy(backend->constant_buffer_mapped[backend->frame_index], mvp, sizeof(float) * 16);
+    /* Store locally - will be uploaded via root constants during draw */
+    memcpy(backend->current_transform, mvp, sizeof(float) * 16);
 }
 
 void d3d12_set_material(D3D12Backend* backend, const float* material_data)
 {
-    if (!backend->material_buffer_mapped[backend->frame_index])
+    if (!material_data)
         return;
 
-    /* Material struct: vec4 base_color, f32 metallic, f32 roughness, f32 emission, f32 _pad */
-    memcpy(backend->material_buffer_mapped[backend->frame_index], material_data, sizeof(float) * 8);
+    /* Store locally - will be uploaded via root constants during draw */
+    memcpy(backend->current_material, material_data, sizeof(float) * 8);
 }
 
 /* =============================================================================
@@ -477,19 +484,13 @@ void d3d12_draw_triangle(D3D12Backend* backend)
     backend->command_list->lpVtbl->SetGraphicsRootSignature(backend->command_list,
                                                             backend->root_signature);
 
-    /* Bind transform constant buffer (root CBV at slot 0) */
-    D3D12_GPU_VIRTUAL_ADDRESS cb_address =
-        backend->constant_buffers[backend->frame_index]->lpVtbl->GetGPUVirtualAddress(
-            backend->constant_buffers[backend->frame_index]);
-    backend->command_list->lpVtbl->SetGraphicsRootConstantBufferView(backend->command_list, 0,
-                                                                     cb_address);
+    /* Set transform via root constants (slot 0, 16 floats) */
+    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(
+        backend->command_list, 0, 16, backend->current_transform, 0);
 
-    /* Bind material constant buffer (root CBV at slot 1) */
-    D3D12_GPU_VIRTUAL_ADDRESS mat_address =
-        backend->material_buffers[backend->frame_index]->lpVtbl->GetGPUVirtualAddress(
-            backend->material_buffers[backend->frame_index]);
-    backend->command_list->lpVtbl->SetGraphicsRootConstantBufferView(backend->command_list, 1,
-                                                                     mat_address);
+    /* Set material via root constants (slot 1, 8 floats) */
+    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(
+        backend->command_list, 1, 8, backend->current_material, 0);
 
     /* Set vertex buffer */
     backend->command_list->lpVtbl->IASetVertexBuffers(backend->command_list, 0, 1,
@@ -642,19 +643,13 @@ void d3d12_draw_mesh(D3D12Backend* backend)
     backend->command_list->lpVtbl->SetGraphicsRootSignature(backend->command_list,
                                                             backend->root_signature);
 
-    /* Bind transform constant buffer (root CBV at slot 0) */
-    D3D12_GPU_VIRTUAL_ADDRESS cb_address =
-        backend->constant_buffers[backend->frame_index]->lpVtbl->GetGPUVirtualAddress(
-            backend->constant_buffers[backend->frame_index]);
-    backend->command_list->lpVtbl->SetGraphicsRootConstantBufferView(backend->command_list, 0,
-                                                                     cb_address);
+    /* Set transform via root constants (slot 0, 16 floats) */
+    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(
+        backend->command_list, 0, 16, backend->current_transform, 0);
 
-    /* Bind material constant buffer (root CBV at slot 1) */
-    D3D12_GPU_VIRTUAL_ADDRESS mat_address =
-        backend->material_buffers[backend->frame_index]->lpVtbl->GetGPUVirtualAddress(
-            backend->material_buffers[backend->frame_index]);
-    backend->command_list->lpVtbl->SetGraphicsRootConstantBufferView(backend->command_list, 1,
-                                                                     mat_address);
+    /* Set material via root constants (slot 1, 8 floats) */
+    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(
+        backend->command_list, 1, 8, backend->current_material, 0);
 
     /* Set vertex buffer */
     backend->command_list->lpVtbl->IASetVertexBuffers(backend->command_list, 0, 1,

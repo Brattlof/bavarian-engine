@@ -94,6 +94,10 @@ typedef struct D3D12Backend
     HWND hwnd;
     b8 vsync;
     b8 initialized;
+
+    /* Current per-draw constants (used with root constants) */
+    float current_transform[16]; /* MVP matrix */
+    float current_material[8];   /* Material data */
 } D3D12Backend;
 
 /* =============================================================================

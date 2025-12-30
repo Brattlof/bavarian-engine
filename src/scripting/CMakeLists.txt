@@ -24,23 +24,12 @@ add_library(bavarian_scripting OBJECT
     compiler/analyzer.c
     compiler/codegen.c
 
-    # Virtual machine
-    vm/vm.c
-    vm/gc.c
-    vm/table.c
-    vm/string.c
-
-    # API bindings
-    bindings/lua_bindings.c
-    bindings/lua_ecs.c
-    bindings/lua_math.c
-    bindings/lua_renderer.c
-    bindings/lua_input.c
-    bindings/lua_scene.c
-
-    # Core scripting
-    scripting.c
-    context.c
+    # Lua bindings (existing files)
+    lua_bindings.c
+    lua_math.c
+    lua_renderer.c
+    lua_input.c
+    lua_state.c
 )
 
 target_include_directories(bavarian_scripting PUBLIC

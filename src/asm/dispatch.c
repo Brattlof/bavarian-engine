@@ -11,6 +11,7 @@
  * calling these functions millions of times per frame.
  */
 
+#include <bavarian3d/math.h>
 #include <bavarian3d/platform.h>
 #include <bavarian3d/types.h>
 
@@ -113,7 +114,7 @@ static void detect_cpu_features(void)
 }
 
 /* =============================================================================
- * Public API
+ * Public Feature Query API
  * ============================================================================= */
 
 b8 cpu_has_sse(void)
@@ -157,17 +158,219 @@ b8 cpu_has_neon(void)
     return g_cpu_features.neon;
 }
 
+/* =============================================================================
+ * External ASM Function Declarations
+ * ============================================================================= */
+
+#if defined(BAV3D_ARCH_X86_64)
+
+/* SSE implementations - defined in math_sse.S */
+extern void vec4_add_sse(Vec4* result, const Vec4* a, const Vec4* b);
+extern void vec4_sub_sse(Vec4* result, const Vec4* a, const Vec4* b);
+extern void vec4_mul_sse(Vec4* result, const Vec4* a, const Vec4* b);
+extern void vec4_scale_sse(Vec4* result, const Vec4* v, f32 s);
+extern f32 vec4_dot_sse(const Vec4* a, const Vec4* b);
+extern f32 vec4_length_sse(const Vec4* v);
+extern void vec4_normalize_sse(Vec4* result, const Vec4* v);
+
+extern void mat4_mul_sse(Mat4* result, const Mat4* a, const Mat4* b);
+extern void mat4_mul_vec4_sse(Vec4* result, const Mat4* m, const Vec4* v);
+extern void mat4_transpose_sse(Mat4* result, const Mat4* m);
+
+/* AVX implementations - defined in math_avx.S */
+/* TODO: Add AVX versions when needed */
+
+#elif defined(BAV3D_ARCH_ARM64)
+
+/* NEON implementations - defined in math_neon.S */
+/* TODO: Add NEON function declarations */
+
+#endif
+
+/* =============================================================================
+ * Optimized Math Wrappers
+ *
+ * These functions select the best implementation at runtime. The first call
+ * triggers CPU feature detection, then we dispatch to the optimal path.
+ *
+ * For truly hot inner loops, consider calling the _sse/_avx functions directly
+ * to avoid the dispatch overhead. But for typical use cases, the branch
+ * predictor handles this well.
+ * ============================================================================= */
+
+#if defined(BAV3D_ARCH_X86_64)
+
+void vec4_add_fast(Vec4* result, const Vec4* a, const Vec4* b)
+{
+    if (cpu_has_sse2())
+    {
+        vec4_add_sse(result, a, b);
+    }
+    else
+    {
+        *result = vec4_add(*a, *b);
+    }
+}
+
+void vec4_sub_fast(Vec4* result, const Vec4* a, const Vec4* b)
+{
+    if (cpu_has_sse2())
+    {
+        vec4_sub_sse(result, a, b);
+    }
+    else
+    {
+        *result = vec4_sub(*a, *b);
+    }
+}
+
+void vec4_mul_fast(Vec4* result, const Vec4* a, const Vec4* b)
+{
+    if (cpu_has_sse2())
+    {
+        vec4_mul_sse(result, a, b);
+    }
+    else
+    {
+        *result = vec4_mul(*a, *b);
+    }
+}
+
+f32 vec4_dot_fast(const Vec4* a, const Vec4* b)
+{
+    if (cpu_has_sse2())
+    {
+        return vec4_dot_sse(a, b);
+    }
+    else
+    {
+        return vec4_dot(*a, *b);
+    }
+}
+
+f32 vec4_length_fast(const Vec4* v)
+{
+    if (cpu_has_sse2())
+    {
+        return vec4_length_sse(v);
+    }
+    else
+    {
+        return vec4_length(*v);
+    }
+}
+
+void vec4_normalize_fast(Vec4* result, const Vec4* v)
+{
+    if (cpu_has_sse2())
+    {
+        vec4_normalize_sse(result, v);
+    }
+    else
+    {
+        *result = vec4_normalize(*v);
+    }
+}
+
+void mat4_mul_fast(Mat4* result, const Mat4* a, const Mat4* b)
+{
+    if (cpu_has_sse2())
+    {
+        mat4_mul_sse(result, a, b);
+    }
+    else
+    {
+        *result = mat4_mul(*a, *b);
+    }
+}
+
+void mat4_mul_vec4_fast(Vec4* result, const Mat4* m, const Vec4* v)
+{
+    if (cpu_has_sse2())
+    {
+        mat4_mul_vec4_sse(result, m, v);
+    }
+    else
+    {
+        *result = mat4_mul_vec4(*m, *v);
+    }
+}
+
+void mat4_transpose_fast(Mat4* result, const Mat4* m)
+{
+    if (cpu_has_sse2())
+    {
+        mat4_transpose_sse(result, m);
+    }
+    else
+    {
+        *result = mat4_transpose(*m);
+    }
+}
+
+#else
+
 /*
- * Function pointer tables for runtime dispatch go here.
- * The idea is we have:
- *
- *   void (*vec4_add_impl)(Vec4*, Vec4*, Vec4*) = vec4_add_scalar;
- *
- * Then at startup (or on first call) we detect CPU features and point it at:
- *   - vec4_add_avx if AVX is available
- *   - vec4_add_sse if SSE is available
- *   - vec4_add_scalar otherwise
- *
- * This adds one indirection per call but it's usually worth it for the SIMD
- * speedup. For really hot inner loops you'd want to batch operations anyway.
+ * Fallback for non-x86 platforms. On ARM64 we'd use NEON, but for now
+ * just use the scalar versions. Still fast enough for most use cases.
  */
+
+void vec4_add_fast(Vec4* result, const Vec4* a, const Vec4* b)
+{
+    *result = vec4_add(*a, *b);
+}
+
+void vec4_sub_fast(Vec4* result, const Vec4* a, const Vec4* b)
+{
+    *result = vec4_sub(*a, *b);
+}
+
+void vec4_mul_fast(Vec4* result, const Vec4* a, const Vec4* b)
+{
+    *result = vec4_mul(*a, *b);
+}
+
+f32 vec4_dot_fast(const Vec4* a, const Vec4* b)
+{
+    return vec4_dot(*a, *b);
+}
+
+f32 vec4_length_fast(const Vec4* v)
+{
+    return vec4_length(*v);
+}
+
+void vec4_normalize_fast(Vec4* result, const Vec4* v)
+{
+    *result = vec4_normalize(*v);
+}
+
+void mat4_mul_fast(Mat4* result, const Mat4* a, const Mat4* b)
+{
+    *result = mat4_mul(*a, *b);
+}
+
+void mat4_mul_vec4_fast(Vec4* result, const Mat4* m, const Vec4* v)
+{
+    *result = mat4_mul_vec4(*m, *v);
+}
+
+void mat4_transpose_fast(Mat4* result, const Mat4* m)
+{
+    *result = mat4_transpose(*m);
+}
+
+#endif
+
+/* =============================================================================
+ * Initialization
+ *
+ * Call this early in engine startup to pre-warm the CPU detection.
+ * Not strictly necessary since the first math call will trigger detection,
+ * but it avoids any first-call latency in performance-sensitive code.
+ * ============================================================================= */
+
+void simd_init(void)
+{
+    detect_cpu_features();
+}

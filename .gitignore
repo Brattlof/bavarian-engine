@@ -1,0 +1,41 @@
+# Build directories
+build/
+out/
+cmake-build-*/
+
+# IDE
+.vs/
+.vscode/
+*.vcxproj*
+*.sln
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+
+# Generated files
+compile_commands.json
+*.pdb
+*.ilk
+*.idb
+
+# Dependencies
+third_party/*/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+Testing/
+*.log

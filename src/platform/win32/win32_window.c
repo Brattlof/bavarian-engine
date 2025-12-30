@@ -8,6 +8,7 @@
  */
 
 #include <bavarian3d/memory.h>
+#include <bavarian3d/platform.h>
 #include <bavarian3d/window.h>
 
 #ifdef BAV3D_PLATFORM_WINDOWS

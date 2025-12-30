@@ -9,6 +9,7 @@
 extern void test_math_suite(void);
 extern void test_memory_suite(void);
 extern void test_arena_suite(void);
+extern void test_ecs_suite(void);
 
 int main(int argc, char** argv)
 {
@@ -21,6 +22,7 @@ int main(int argc, char** argv)
     test_math_suite();
     test_memory_suite();
     test_arena_suite();
+    test_ecs_suite();
 
     TEST_MAIN_END();
 }

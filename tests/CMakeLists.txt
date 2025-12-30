@@ -10,6 +10,7 @@ add_executable(bavarian3d_tests
     test_math.c
     test_memory.c
     test_arena.c
+    test_ecs.c
 )
 
 target_include_directories(bavarian3d_tests PRIVATE

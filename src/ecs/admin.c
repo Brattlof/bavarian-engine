@@ -73,6 +73,226 @@ struct BavEntityAdmin
 };
 
 /* =============================================================================
+ * Archetype Management
+ * ============================================================================= */
+
+static BavArchetype* find_archetype(BavEntityAdmin* admin, u64 mask)
+{
+    for (u32 i = 0; i < admin->archetype_count; i++)
+    {
+        if (admin->archetypes[i] && admin->archetypes[i]->component_mask == mask)
+        {
+            return admin->archetypes[i];
+        }
+    }
+    return NULL;
+}
+
+static BavArchetype* get_or_create_archetype(BavEntityAdmin* admin, u64 mask)
+{
+    BavArchetype* arch = find_archetype(admin, mask);
+    if (arch)
+        return arch;
+
+    /* Create new archetype */
+    arch = calloc(1, sizeof(BavArchetype));
+    if (!arch)
+        return NULL;
+
+    arch->component_mask = mask;
+    arch->entity_capacity = 16;
+
+    /* Count and identify components */
+    u32 comp_count = 0;
+    for (u32 i = 0; i < 64; i++)
+    {
+        if (mask & (1ULL << i))
+            comp_count++;
+    }
+    arch->component_count = comp_count;
+
+    arch->entities = calloc(arch->entity_capacity, sizeof(BavEntity));
+    arch->component_arrays = calloc(comp_count, sizeof(void*));
+    arch->component_ids = calloc(comp_count, sizeof(BavComponentId));
+
+    if (!arch->entities || !arch->component_arrays || !arch->component_ids)
+    {
+        free(arch->entities);
+        free(arch->component_arrays);
+        free(arch->component_ids);
+        free(arch);
+        return NULL;
+    }
+
+    /* Initialize component arrays with proper sizes */
+    u32 idx = 0;
+    for (u32 i = 0; i < 64 && idx < comp_count; i++)
+    {
+        if (mask & (1ULL << i))
+        {
+            arch->component_ids[idx] = i;
+            const BavComponentInfo* info = &admin->components[i];
+            arch->component_arrays[idx] = calloc(arch->entity_capacity, info->size);
+            if (!arch->component_arrays[idx])
+            {
+                /* Cleanup on failure */
+                for (u32 j = 0; j < idx; j++)
+                {
+                    free(arch->component_arrays[j]);
+                }
+                free(arch->entities);
+                free(arch->component_arrays);
+                free(arch->component_ids);
+                free(arch);
+                return NULL;
+            }
+            idx++;
+        }
+    }
+
+    /* Add to admin */
+    if (admin->archetype_count >= admin->archetype_capacity)
+    {
+        u32 new_cap = admin->archetype_capacity * 2;
+        BavArchetype** new_arr = realloc(admin->archetypes, new_cap * sizeof(BavArchetype*));
+        if (!new_arr)
+        {
+            for (u32 j = 0; j < comp_count; j++)
+            {
+                free(arch->component_arrays[j]);
+            }
+            free(arch->entities);
+            free(arch->component_arrays);
+            free(arch->component_ids);
+            free(arch);
+            return NULL;
+        }
+        admin->archetypes = new_arr;
+        admin->archetype_capacity = new_cap;
+    }
+
+    admin->archetypes[admin->archetype_count++] = arch;
+    return arch;
+}
+
+static b8 archetype_grow(BavEntityAdmin* admin, BavArchetype* arch)
+{
+    u32 new_cap = arch->entity_capacity * 2;
+
+    BavEntity* new_entities = realloc(arch->entities, new_cap * sizeof(BavEntity));
+    if (!new_entities)
+        return 0;
+    arch->entities = new_entities;
+
+    for (u32 i = 0; i < arch->component_count; i++)
+    {
+        const BavComponentInfo* info = &admin->components[arch->component_ids[i]];
+        void* new_arr = realloc(arch->component_arrays[i], new_cap * info->size);
+        if (!new_arr)
+            return 0;
+        arch->component_arrays[i] = new_arr;
+    }
+
+    arch->entity_capacity = new_cap;
+    return 1;
+}
+
+static u32 archetype_add_entity(BavEntityAdmin* admin, BavArchetype* arch, BavEntity entity)
+{
+    if (arch->entity_count >= arch->entity_capacity)
+    {
+        if (!archetype_grow(admin, arch))
+            return (u32)-1;
+    }
+
+    u32 row = arch->entity_count++;
+    arch->entities[row] = entity;
+    return row;
+}
+
+static void archetype_remove_entity(BavEntityAdmin* admin, BavArchetype* arch, u32 row)
+{
+    if (row >= arch->entity_count)
+        return;
+
+    u32 last = arch->entity_count - 1;
+    if (row != last)
+    {
+        /* Swap with last entity to avoid gaps */
+        arch->entities[row] = arch->entities[last];
+
+        for (u32 i = 0; i < arch->component_count; i++)
+        {
+            const BavComponentInfo* info = &admin->components[arch->component_ids[i]];
+            char* arr = arch->component_arrays[i];
+            memcpy(arr + row * info->size, arr + last * info->size, info->size);
+        }
+
+        /* Update swapped entity's record */
+        BavEntity moved = arch->entities[row];
+        if (moved.index < admin->entity_capacity)
+        {
+            admin->entities[moved.index].row = row;
+        }
+    }
+
+    arch->entity_count--;
+}
+
+static void migrate_entity(BavEntityAdmin* admin, BavEntity entity, BavArchetype* from,
+                           BavArchetype* to, BavComponentId added_component, const void* added_data,
+                           BavComponentId removed_component)
+{
+    (void)removed_component; /* Used for API clarity; removal excludes from destination mask */
+    EntityRecord* rec = &admin->entities[entity.index];
+    u32 old_row = rec->row;
+
+    /* Add to new archetype */
+    u32 new_row = archetype_add_entity(admin, to, entity);
+    if (new_row == (u32)-1)
+        return;
+
+    /* Copy existing component data */
+    for (u32 i = 0; i < to->component_count; i++)
+    {
+        BavComponentId comp_id = to->component_ids[i];
+
+        if (comp_id == added_component && added_data)
+        {
+            /* This is the newly added component */
+            const BavComponentInfo* info = &admin->components[comp_id];
+            char* dst = (char*)to->component_arrays[i] + new_row * info->size;
+            memcpy(dst, added_data, info->size);
+        }
+        else if (from)
+        {
+            /* Copy from old archetype */
+            for (u32 j = 0; j < from->component_count; j++)
+            {
+                if (from->component_ids[j] == comp_id)
+                {
+                    const BavComponentInfo* info = &admin->components[comp_id];
+                    char* src = (char*)from->component_arrays[j] + old_row * info->size;
+                    char* dst = (char*)to->component_arrays[i] + new_row * info->size;
+                    memcpy(dst, src, info->size);
+                    break;
+                }
+            }
+        }
+    }
+
+    /* Remove from old archetype */
+    if (from)
+    {
+        archetype_remove_entity(admin, from, old_row);
+    }
+
+    /* Update entity record */
+    rec->archetype = to;
+    rec->row = new_row;
+}
+
+/* =============================================================================
  * Entity Admin Lifecycle
  * ============================================================================= */
 
@@ -159,21 +379,90 @@ void bav_entity_admin_flush(BavEntityAdmin* admin)
                     EntityRecord* rec = &admin->entities[cmd->entity.index];
                     if (rec->alive && rec->generation == cmd->entity.generation)
                     {
+                        /* Remove from archetype first */
+                        if (rec->archetype)
+                        {
+                            archetype_remove_entity(admin, rec->archetype, rec->row);
+                            rec->archetype = NULL;
+                        }
+
                         rec->alive = 0;
                         /* Add to free list */
                         admin->free_list[admin->free_count++] = cmd->entity.index;
                         admin->entity_count--;
-                        /* TODO: Remove from archetype */
                     }
                 }
                 break;
 
             case CMD_ADD_COMPONENT:
-                /* TODO: Implement archetype migration */
+                if (cmd->entity.index < admin->entity_capacity)
+                {
+                    EntityRecord* rec = &admin->entities[cmd->entity.index];
+                    if (rec->alive && rec->generation == cmd->entity.generation)
+                    {
+                        /* Calculate new component mask */
+                        u64 old_mask = rec->archetype ? rec->archetype->component_mask : 0;
+                        u64 new_mask = old_mask | (1ULL << cmd->component);
+
+                        if (new_mask != old_mask)
+                        {
+                            BavArchetype* target = get_or_create_archetype(admin, new_mask);
+                            if (target)
+                            {
+                                migrate_entity(admin, cmd->entity, rec->archetype, target,
+                                               cmd->component, cmd->data, BAV_COMPONENT_INVALID);
+                            }
+                        }
+                        else if (rec->archetype && cmd->data)
+                        {
+                            /* Component already exists, just update data */
+                            for (u32 c = 0; c < rec->archetype->component_count; c++)
+                            {
+                                if (rec->archetype->component_ids[c] == cmd->component)
+                                {
+                                    const BavComponentInfo* info =
+                                        &admin->components[cmd->component];
+                                    char* dst = (char*)rec->archetype->component_arrays[c] +
+                                                rec->row * info->size;
+                                    memcpy(dst, cmd->data, info->size);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
                 break;
 
             case CMD_REMOVE_COMPONENT:
-                /* TODO: Implement archetype migration */
+                if (cmd->entity.index < admin->entity_capacity)
+                {
+                    EntityRecord* rec = &admin->entities[cmd->entity.index];
+                    if (rec->alive && rec->generation == cmd->entity.generation && rec->archetype)
+                    {
+                        u64 old_mask = rec->archetype->component_mask;
+                        u64 new_mask = old_mask & ~(1ULL << cmd->component);
+
+                        if (new_mask != old_mask)
+                        {
+                            if (new_mask == 0)
+                            {
+                                /* No components left - just remove from archetype */
+                                archetype_remove_entity(admin, rec->archetype, rec->row);
+                                rec->archetype = NULL;
+                                rec->row = 0;
+                            }
+                            else
+                            {
+                                BavArchetype* target = get_or_create_archetype(admin, new_mask);
+                                if (target)
+                                {
+                                    migrate_entity(admin, cmd->entity, rec->archetype, target,
+                                                   BAV_COMPONENT_INVALID, NULL, cmd->component);
+                                }
+                            }
+                        }
+                    }
+                }
                 break;
         }
 
@@ -424,7 +713,7 @@ void bav_query_each(BavEntityAdmin* admin, const BavQuery* query, BavQueryCallba
     for (u32 a = 0; a < admin->archetype_count; a++)
     {
         BavArchetype* arch = admin->archetypes[a];
-        if (!arch)
+        if (!arch || arch->entity_count == 0)
             continue;
 
         /* Check if archetype matches query */
@@ -433,10 +722,10 @@ void bav_query_each(BavEntityAdmin* admin, const BavQuery* query, BavQueryCallba
         if (arch->component_mask & query->excluded_mask)
             continue;
 
-        /* Build component pointer array for this archetype */
-        /* TODO: This should be optimized with ASM for the hot path */
-        void* components[BAV_MAX_COMPONENTS];
-        u32 comp_idx = 0;
+        /* Build component index map: maps query component order to archetype array index */
+        u32 arch_indices[BAV_MAX_COMPONENTS];
+        usize component_sizes[BAV_MAX_COMPONENTS];
+        u32 query_comp_count = 0;
 
         for (u32 c = 0; c < 64; c++)
         {
@@ -446,7 +735,9 @@ void bav_query_each(BavEntityAdmin* admin, const BavQuery* query, BavQueryCallba
                 {
                     if (arch->component_ids[i] == c)
                     {
-                        components[comp_idx++] = arch->component_arrays[i];
+                        arch_indices[query_comp_count] = i;
+                        component_sizes[query_comp_count] = admin->components[c].size;
+                        query_comp_count++;
                         break;
                     }
                 }
@@ -456,13 +747,13 @@ void bav_query_each(BavEntityAdmin* admin, const BavQuery* query, BavQueryCallba
         /* Iterate entities in archetype */
         for (u32 e = 0; e < arch->entity_count; e++)
         {
-            /* Update component pointers for this entity */
+            /* Build component pointer array for this entity */
             void* entity_components[BAV_MAX_COMPONENTS];
-            for (u32 c = 0; c < comp_idx; c++)
+            for (u32 c = 0; c < query_comp_count; c++)
             {
-                /* TODO: Get component size from registry */
-                /* For now, assume fixed stride - this is a stub */
-                entity_components[c] = components[c];
+                u32 arr_idx = arch_indices[c];
+                char* base = arch->component_arrays[arr_idx];
+                entity_components[c] = base + (e * component_sizes[c]);
             }
 
             callback(arch->entities[e], entity_components, user_data);

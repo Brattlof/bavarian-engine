@@ -114,7 +114,10 @@ void arena_reset(Arena* arena)
 
 void* arena_alloc(Arena* arena, usize size, usize align)
 {
-    usize aligned_offset = mem_align_up(arena->offset, align);
+    /* Align based on absolute address, not just offset */
+    usize current_addr = (usize)(arena->base + arena->offset);
+    usize aligned_addr = mem_align_up(current_addr, align);
+    usize aligned_offset = arena->offset + (aligned_addr - current_addr);
     usize new_offset = aligned_offset + size;
 
     if (new_offset > arena->size)

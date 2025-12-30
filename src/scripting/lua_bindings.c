@@ -20,6 +20,7 @@
 extern void bav_lua_register_math(BavScriptContext* ctx);
 extern void bav_lua_register_input(BavScriptContext* ctx);
 extern void bav_lua_register_renderer(BavScriptContext* ctx);
+extern void bav_lua_register_ecs(BavScriptContext* ctx);
 
 /* =============================================================================
  * Core Functions
@@ -344,4 +345,5 @@ void bav_lua_register_all(BavScriptContext* ctx)
     bav_lua_register_math(ctx);
     bav_lua_register_input(ctx);
     bav_lua_register_renderer(ctx);
+    bav_lua_register_ecs(ctx);
 }

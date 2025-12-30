@@ -1830,3 +1830,260 @@ void bav_script_register_module(BavScriptContext* ctx, const char* module_name,
     LuaString* mod_key = string_create(module_name, strlen(module_name));
     table_set(ctx->vm->globals, VALUE_STRING(mod_key), VALUE_TABLE(module));
 }
+
+/* =============================================================================
+ * Script Hot-Reload
+ *
+ * This is the runtime side of hot-reload. The asset pipeline (hot_reload.c)
+ * handles detecting file changes and re-importing. Here we handle recompiling
+ * and reloading scripts at runtime while preserving state.
+ *
+ * The tricky bit is preserving globals - when we reload a script, we want to
+ * keep the old global values unless the new script explicitly overrides them.
+ * ============================================================================= */
+
+#include <sys/stat.h>
+
+/* Track loaded scripts for hot-reload */
+typedef struct LoadedScript
+{
+    char filename[256];
+    u64 load_time;      /* When we last loaded this script */
+    b8 valid;
+} LoadedScript;
+
+#define MAX_LOADED_SCRIPTS 64
+static LoadedScript g_loaded_scripts[MAX_LOADED_SCRIPTS];
+static u32 g_loaded_script_count = 0;
+
+/* Get file modification time - platform specific but we'll use stat */
+static u64 get_file_mtime(const char* path)
+{
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return 0;
+
+#ifdef _WIN32
+    return (u64)st.st_mtime;
+#else
+    return (u64)st.st_mtime;
+#endif
+}
+
+/* Track a loaded script file */
+static void track_loaded_script(const char* filename)
+{
+    /* Check if already tracking */
+    for (u32 i = 0; i < g_loaded_script_count; i++)
+    {
+        if (g_loaded_scripts[i].valid && strcmp(g_loaded_scripts[i].filename, filename) == 0)
+        {
+            g_loaded_scripts[i].load_time = get_file_mtime(filename);
+            return;
+        }
+    }
+
+    /* Add new entry */
+    if (g_loaded_script_count < MAX_LOADED_SCRIPTS)
+    {
+        LoadedScript* entry = &g_loaded_scripts[g_loaded_script_count++];
+        strncpy(entry->filename, filename, sizeof(entry->filename) - 1);
+        entry->filename[sizeof(entry->filename) - 1] = '\0';
+        entry->load_time = get_file_mtime(filename);
+        entry->valid = true;
+    }
+}
+
+/* Find loaded script entry */
+static LoadedScript* find_loaded_script(const char* filename)
+{
+    for (u32 i = 0; i < g_loaded_script_count; i++)
+    {
+        if (g_loaded_scripts[i].valid && strcmp(g_loaded_scripts[i].filename, filename) == 0)
+        {
+            return &g_loaded_scripts[i];
+        }
+    }
+    return NULL;
+}
+
+b8 bav_script_needs_reload(BavScriptContext* ctx, const char* filename)
+{
+    BAV_UNUSED(ctx); /* Reload check is global, not per-context */
+
+    if (!filename)
+        return false;
+
+    LoadedScript* entry = find_loaded_script(filename);
+    if (!entry)
+        return false; /* Not tracking this file */
+
+    u64 current_mtime = get_file_mtime(filename);
+    return current_mtime > entry->load_time;
+}
+
+BavResult bav_script_hot_reload(BavScriptContext* ctx, const char* filename)
+{
+    if (!ctx || !filename)
+        return BAV_ERROR_INVALID_ARG;
+
+    /* Read the script file */
+    FILE* f = fopen(filename, "rb");
+    if (!f)
+    {
+        fprintf(stderr, "[script] Failed to open %s for hot-reload\n", filename);
+        return BAV_ERROR_IO;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (file_size <= 0)
+    {
+        fclose(f);
+        return BAV_ERROR_IO;
+    }
+
+    char* source = malloc((usize)file_size + 1);
+    if (!source)
+    {
+        fclose(f);
+        return BAV_ERROR_OUT_OF_MEMORY;
+    }
+
+    usize read_size = fread(source, 1, (usize)file_size, f);
+    fclose(f);
+    source[read_size] = '\0';
+
+    /* Compile the script */
+    BavCompileOptions options = {0};
+    options.filename = filename;
+    options.debug_info = true;
+    options.optimize = true;
+
+    BavCompileResult result = bav_compile_lua(source, read_size, &options);
+    free(source);
+
+    if (!result.success)
+    {
+        fprintf(stderr, "[script] Hot-reload compile errors in %s:\n", filename);
+        for (u32 i = 0; i < result.error_count; i++)
+        {
+            fprintf(stderr, "  %s:%u:%u: %s\n",
+                    result.errors[i].filename ? result.errors[i].filename : filename,
+                    result.errors[i].line, result.errors[i].column,
+                    result.errors[i].message);
+        }
+        bav_compile_result_free(&result);
+        return BAV_ERROR_GENERAL;
+    }
+
+    /*
+     * Load the new script into the context.
+     * This replaces the main proto but preserves the VM state (globals).
+     * Scripts that define new functions will add them to globals,
+     * but existing global values are kept.
+     */
+    BavResult load_result = bav_script_context_load(ctx, result.script);
+    if (BAV_FAILED(load_result))
+    {
+        bav_compile_result_free(&result);
+        return load_result;
+    }
+
+    /* Execute the main chunk to re-register functions and update globals */
+    BavCallResult call_result = bav_script_call(ctx, NULL, NULL, 0);
+    if (!call_result.success)
+    {
+        fprintf(stderr, "[script] Hot-reload execution error: %s\n",
+                call_result.error ? call_result.error : "unknown");
+        return BAV_ERROR_GENERAL;
+    }
+
+    /* Update the tracked load time */
+    track_loaded_script(filename);
+
+    printf("[script] Hot-reloaded: %s\n", filename);
+    return BAV_OK;
+}
+
+/* Helper to initially load a script file (and track it for hot-reload) */
+BavResult bav_script_load_file(BavScriptContext* ctx, const char* filename)
+{
+    if (!ctx || !filename)
+        return BAV_ERROR_INVALID_ARG;
+
+    /* Read the script file */
+    FILE* f = fopen(filename, "rb");
+    if (!f)
+    {
+        return BAV_ERROR_IO;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (file_size <= 0)
+    {
+        fclose(f);
+        return BAV_ERROR_IO;
+    }
+
+    char* source = malloc((usize)file_size + 1);
+    if (!source)
+    {
+        fclose(f);
+        return BAV_ERROR_OUT_OF_MEMORY;
+    }
+
+    usize read_size = fread(source, 1, (usize)file_size, f);
+    fclose(f);
+    source[read_size] = '\0';
+
+    /* Compile the script */
+    BavCompileOptions options = {0};
+    options.filename = filename;
+    options.debug_info = true;
+    options.optimize = true;
+
+    BavCompileResult result = bav_compile_lua(source, read_size, &options);
+    free(source);
+
+    if (!result.success)
+    {
+        fprintf(stderr, "[script] Compile errors in %s:\n", filename);
+        for (u32 i = 0; i < result.error_count; i++)
+        {
+            fprintf(stderr, "  %s:%u:%u: %s\n",
+                    result.errors[i].filename ? result.errors[i].filename : filename,
+                    result.errors[i].line, result.errors[i].column,
+                    result.errors[i].message);
+        }
+        bav_compile_result_free(&result);
+        return BAV_ERROR_GENERAL;
+    }
+
+    /* Load the script */
+    BavResult load_result = bav_script_context_load(ctx, result.script);
+    if (BAV_FAILED(load_result))
+    {
+        bav_compile_result_free(&result);
+        return load_result;
+    }
+
+    /* Execute the main chunk */
+    BavCallResult call_result = bav_script_call(ctx, NULL, NULL, 0);
+    if (!call_result.success)
+    {
+        fprintf(stderr, "[script] Execution error: %s\n",
+                call_result.error ? call_result.error : "unknown");
+        return BAV_ERROR_GENERAL;
+    }
+
+    /* Track for hot-reload */
+    track_loaded_script(filename);
+
+    return BAV_OK;
+}

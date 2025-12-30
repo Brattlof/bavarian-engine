@@ -146,6 +146,31 @@ extern "C"
      */
     void renderer_draw_triangle(Renderer* renderer);
 
+    /**
+     * Upload mesh data to GPU.
+     * This creates GPU buffers and copies the mesh data.
+     *
+     * @param vertices Vertex data
+     * @param vertex_count Number of vertices
+     * @param vertex_stride Bytes per vertex
+     * @param indices Index data (can be NULL for non-indexed)
+     * @param index_count Number of indices (0 for non-indexed)
+     * @return true on success
+     */
+    b8 renderer_upload_mesh(Renderer* renderer, const void* vertices, u32 vertex_count,
+                            u32 vertex_stride, const u32* indices, u32 index_count);
+
+    /**
+     * Destroy the currently uploaded mesh.
+     */
+    void renderer_destroy_mesh(Renderer* renderer);
+
+    /**
+     * Draw the currently uploaded mesh.
+     * Must be called between begin_frame and end_frame, after clear and set_transform.
+     */
+    void renderer_draw_mesh(Renderer* renderer);
+
 #ifdef __cplusplus
 }
 #endif

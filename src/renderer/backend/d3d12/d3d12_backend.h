@@ -61,9 +61,17 @@ typedef struct D3D12Backend
     ID3D12RootSignature* root_signature;
     ID3D12PipelineState* pipeline_state;
 
-    /* Geometry buffers */
+    /* Geometry buffers (for built-in triangle) */
     ID3D12Resource* vertex_buffer;
     D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view;
+
+    /* Dynamic mesh buffers (for uploaded meshes) */
+    ID3D12Resource* mesh_vertex_buffer;
+    ID3D12Resource* mesh_index_buffer;
+    D3D12_VERTEX_BUFFER_VIEW mesh_vbv;
+    D3D12_INDEX_BUFFER_VIEW mesh_ibv;
+    u32 mesh_vertex_count;
+    u32 mesh_index_count;
 
     /* Constant buffers (per-frame for double buffering) */
     ID3D12Resource* constant_buffers[D3D12_FRAME_COUNT];
@@ -120,6 +128,15 @@ b8 d3d12_create_depth_buffer(D3D12Backend* backend);
 void d3d12_destroy_depth_buffer(D3D12Backend* backend);
 void d3d12_set_transform(D3D12Backend* backend, const float* mvp);
 void d3d12_draw_triangle(D3D12Backend* backend);
+
+/* =============================================================================
+ * Mesh Operations
+ * ============================================================================= */
+
+b8 d3d12_upload_mesh(D3D12Backend* backend, const void* vertices, u32 vertex_count,
+                     u32 vertex_stride, const u32* indices, u32 index_count);
+void d3d12_destroy_mesh(D3D12Backend* backend);
+void d3d12_draw_mesh(D3D12Backend* backend);
 
 #endif /* BAV3D_PLATFORM_WINDOWS */
 

@@ -328,3 +328,55 @@ void renderer_draw_triangle(Renderer* renderer)
             break;
     }
 }
+
+b8 renderer_upload_mesh(Renderer* renderer, const void* vertices, u32 vertex_count,
+                        u32 vertex_stride, const u32* indices, u32 index_count)
+{
+    if (!renderer)
+        return false;
+
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            return d3d12_upload_mesh(&renderer->d3d12, vertices, vertex_count, vertex_stride,
+                                     indices, index_count);
+#endif
+        default:
+            return false;
+    }
+}
+
+void renderer_destroy_mesh(Renderer* renderer)
+{
+    if (!renderer)
+        return;
+
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            d3d12_destroy_mesh(&renderer->d3d12);
+            break;
+#endif
+        default:
+            break;
+    }
+}
+
+void renderer_draw_mesh(Renderer* renderer)
+{
+    if (!renderer)
+        return;
+
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            d3d12_draw_mesh(&renderer->d3d12);
+            break;
+#endif
+        default:
+            break;
+    }
+}

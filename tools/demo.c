@@ -12,6 +12,7 @@
 #include <bavarian3d/camera.h>
 #include <bavarian3d/math.h>
 #include <bavarian3d/memory.h>
+#include <bavarian3d/mesh.h>
 #include <bavarian3d/renderer.h>
 #include <bavarian3d/types.h>
 #include <bavarian3d/window.h>
@@ -172,8 +173,18 @@ int main(int argc, char** argv)
     camera_init(&cam);
     camera_set_perspective(&cam, math_radians(60.0f),
                            (f32)window_desc.width / (f32)window_desc.height, 0.1f, 100.0f);
-    camera_set_position(&cam, vec3(0.0f, 0.0f, 2.0f));
+    camera_set_position(&cam, vec3(0.0f, 1.0f, 3.0f));
     printf("Camera initialized\n");
+
+    /* Create and upload a cube mesh */
+    Mesh* cube = mesh_create_cube();
+    if (cube)
+    {
+        renderer_upload_mesh(renderer, cube->vertices, cube->vertex_count, cube->vertex_stride,
+                             cube->indices, cube->index_count);
+        printf("Cube mesh created: %u vertices, %u indices\n", cube->vertex_count,
+               cube->index_count);
+    }
 
     /* Main loop */
     printf("\nStarting main loop (press close button or ESC to exit)...\n");
@@ -199,14 +210,24 @@ int main(int argc, char** argv)
 
             renderer_clear(renderer, r, g, b, 1.0f);
 
-            /* Rotate the triangle around Y axis */
-            f32 angle = time * 1.0f;
-            Mat4 model = mat4_rotate_y(angle);
+            /* Rotate the cube around Y axis (and a bit on X for interest) */
+            f32 angle_y = time * 0.5f;
+            f32 angle_x = time * 0.3f;
+            Mat4 rot_y = mat4_rotate_y(angle_y);
+            Mat4 rot_x = mat4_rotate_x(angle_x);
+            Mat4 model = mat4_mul(rot_y, rot_x);
             Mat4 view_proj = camera_get_view_projection(&cam);
             Mat4 mvp = mat4_mul(view_proj, model);
 
             renderer_set_transform(renderer, (const float*)&mvp);
-            renderer_draw_triangle(renderer);
+            if (cube)
+            {
+                renderer_draw_mesh(renderer);
+            }
+            else
+            {
+                renderer_draw_triangle(renderer);
+            }
             renderer_end_frame(renderer);
         }
 
@@ -230,6 +251,11 @@ int main(int argc, char** argv)
 
     /* Cleanup */
     printf("\nShutting down...\n");
+    if (cube)
+    {
+        renderer_destroy_mesh(renderer);
+        mesh_destroy(cube);
+    }
     bav_entity_admin_destroy(ecs);
     renderer_destroy(renderer);
     window_destroy(window);

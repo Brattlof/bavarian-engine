@@ -28,10 +28,19 @@ b8 d3d12_create_triangle_pipeline(D3D12Backend* backend)
 {
     HRESULT hr;
 
-    /* Create empty root signature (no parameters needed for basic triangle) */
+    /*
+     * Root signature with one CBV for the MVP matrix.
+     * Using a root descriptor (not a descriptor table) for simplicity.
+     */
+    D3D12_ROOT_PARAMETER root_param = {0};
+    root_param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    root_param.Descriptor.ShaderRegister = 0; /* b0 */
+    root_param.Descriptor.RegisterSpace = 0;
+    root_param.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+
     D3D12_ROOT_SIGNATURE_DESC root_sig_desc = {0};
-    root_sig_desc.NumParameters = 0;
-    root_sig_desc.pParameters = NULL;
+    root_sig_desc.NumParameters = 1;
+    root_sig_desc.pParameters = &root_param;
     root_sig_desc.NumStaticSamplers = 0;
     root_sig_desc.pStaticSamplers = NULL;
     root_sig_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -102,9 +111,12 @@ b8 d3d12_create_triangle_pipeline(D3D12Backend* backend)
     pso_desc.RasterizerState.ForcedSampleCount = 0;
     pso_desc.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
-    /* Depth stencil state - disabled for now */
-    pso_desc.DepthStencilState.DepthEnable = FALSE;
+    /* Depth stencil state - enabled with depth test */
+    pso_desc.DepthStencilState.DepthEnable = TRUE;
+    pso_desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    pso_desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     pso_desc.DepthStencilState.StencilEnable = FALSE;
+    pso_desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
     pso_desc.InputLayout.pInputElementDescs = input_layout;
     pso_desc.InputLayout.NumElements = 2;
@@ -224,6 +236,181 @@ void d3d12_destroy_triangle_buffers(D3D12Backend* backend)
 }
 
 /* =============================================================================
+ * Constant Buffers
+ * ============================================================================= */
+
+/* Constant buffer size must be 256-byte aligned */
+#define CB_ALIGN 256
+#define CB_SIZE ((sizeof(float) * 16 + CB_ALIGN - 1) & ~(CB_ALIGN - 1))
+
+b8 d3d12_create_constant_buffers(D3D12Backend* backend)
+{
+    HRESULT hr;
+
+    /* Create upload heap constant buffers (one per frame) */
+    D3D12_HEAP_PROPERTIES heap_props = {0};
+    heap_props.Type = D3D12_HEAP_TYPE_UPLOAD;
+    heap_props.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    heap_props.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    heap_props.CreationNodeMask = 1;
+    heap_props.VisibleNodeMask = 1;
+
+    D3D12_RESOURCE_DESC resource_desc = {0};
+    resource_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    resource_desc.Alignment = 0;
+    resource_desc.Width = CB_SIZE;
+    resource_desc.Height = 1;
+    resource_desc.DepthOrArraySize = 1;
+    resource_desc.MipLevels = 1;
+    resource_desc.Format = DXGI_FORMAT_UNKNOWN;
+    resource_desc.SampleDesc.Count = 1;
+    resource_desc.SampleDesc.Quality = 0;
+    resource_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    resource_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+    for (UINT i = 0; i < D3D12_FRAME_COUNT; i++)
+    {
+        hr = backend->device->lpVtbl->CreateCommittedResource(
+            backend->device, &heap_props, D3D12_HEAP_FLAG_NONE, &resource_desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, NULL, &IID_ID3D12Resource,
+            (void**)&backend->constant_buffers[i]);
+        if (FAILED(hr))
+        {
+            fprintf(stderr, "D3D12: Failed to create constant buffer %u (hr=0x%08lX)\n", i, hr);
+            return false;
+        }
+
+        /* Keep constant buffers persistently mapped */
+        D3D12_RANGE read_range = {0, 0};
+        hr = backend->constant_buffers[i]->lpVtbl->Map(backend->constant_buffers[i], 0, &read_range,
+                                                        &backend->constant_buffer_mapped[i]);
+        if (FAILED(hr))
+        {
+            fprintf(stderr, "D3D12: Failed to map constant buffer %u (hr=0x%08lX)\n", i, hr);
+            return false;
+        }
+
+        /* Initialize with identity matrix */
+        float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        memcpy(backend->constant_buffer_mapped[i], identity, sizeof(identity));
+    }
+
+    return true;
+}
+
+void d3d12_destroy_constant_buffers(D3D12Backend* backend)
+{
+    for (UINT i = 0; i < D3D12_FRAME_COUNT; i++)
+    {
+        if (backend->constant_buffers[i])
+        {
+            backend->constant_buffers[i]->lpVtbl->Unmap(backend->constant_buffers[i], 0, NULL);
+            backend->constant_buffers[i]->lpVtbl->Release(backend->constant_buffers[i]);
+            backend->constant_buffers[i] = NULL;
+            backend->constant_buffer_mapped[i] = NULL;
+        }
+    }
+}
+
+void d3d12_set_transform(D3D12Backend* backend, const float* mvp)
+{
+    if (!backend->constant_buffer_mapped[backend->frame_index])
+        return;
+
+    memcpy(backend->constant_buffer_mapped[backend->frame_index], mvp, sizeof(float) * 16);
+}
+
+/* =============================================================================
+ * Depth Buffer
+ * ============================================================================= */
+
+b8 d3d12_create_depth_buffer(D3D12Backend* backend)
+{
+    HRESULT hr;
+
+    /* Create DSV descriptor heap */
+    D3D12_DESCRIPTOR_HEAP_DESC dsv_heap_desc = {0};
+    dsv_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    dsv_heap_desc.NumDescriptors = 1;
+    dsv_heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    dsv_heap_desc.NodeMask = 0;
+
+    hr = backend->device->lpVtbl->CreateDescriptorHeap(backend->device, &dsv_heap_desc,
+                                                        &IID_ID3D12DescriptorHeap,
+                                                        (void**)&backend->dsv_heap);
+    if (FAILED(hr))
+    {
+        fprintf(stderr, "D3D12: Failed to create DSV heap (hr=0x%08lX)\n", hr);
+        return false;
+    }
+
+    /* Create depth buffer */
+    D3D12_HEAP_PROPERTIES heap_props = {0};
+    heap_props.Type = D3D12_HEAP_TYPE_DEFAULT;
+    heap_props.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    heap_props.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    heap_props.CreationNodeMask = 1;
+    heap_props.VisibleNodeMask = 1;
+
+    D3D12_RESOURCE_DESC depth_desc = {0};
+    depth_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    depth_desc.Alignment = 0;
+    depth_desc.Width = backend->width;
+    depth_desc.Height = backend->height;
+    depth_desc.DepthOrArraySize = 1;
+    depth_desc.MipLevels = 1;
+    depth_desc.Format = DXGI_FORMAT_D32_FLOAT;
+    depth_desc.SampleDesc.Count = 1;
+    depth_desc.SampleDesc.Quality = 0;
+    depth_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    depth_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    D3D12_CLEAR_VALUE clear_value = {0};
+    clear_value.Format = DXGI_FORMAT_D32_FLOAT;
+    clear_value.DepthStencil.Depth = 1.0f;
+    clear_value.DepthStencil.Stencil = 0;
+
+    hr = backend->device->lpVtbl->CreateCommittedResource(
+        backend->device, &heap_props, D3D12_HEAP_FLAG_NONE, &depth_desc,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE, &clear_value, &IID_ID3D12Resource,
+        (void**)&backend->depth_buffer);
+    if (FAILED(hr))
+    {
+        fprintf(stderr, "D3D12: Failed to create depth buffer (hr=0x%08lX)\n", hr);
+        return false;
+    }
+
+    /* Create DSV */
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {0};
+    dsv_desc.Format = DXGI_FORMAT_D32_FLOAT;
+    dsv_desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsv_desc.Flags = D3D12_DSV_FLAG_NONE;
+    dsv_desc.Texture2D.MipSlice = 0;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv_handle;
+    backend->dsv_heap->lpVtbl->GetCPUDescriptorHandleForHeapStart(backend->dsv_heap, &dsv_handle);
+
+    backend->device->lpVtbl->CreateDepthStencilView(backend->device, backend->depth_buffer,
+                                                     &dsv_desc, dsv_handle);
+
+    return true;
+}
+
+void d3d12_destroy_depth_buffer(D3D12Backend* backend)
+{
+    if (backend->depth_buffer)
+    {
+        backend->depth_buffer->lpVtbl->Release(backend->depth_buffer);
+        backend->depth_buffer = NULL;
+    }
+    if (backend->dsv_heap)
+    {
+        backend->dsv_heap->lpVtbl->Release(backend->dsv_heap);
+        backend->dsv_heap = NULL;
+    }
+}
+
+/* =============================================================================
  * Triangle Drawing
  * ============================================================================= */
 
@@ -236,6 +423,13 @@ void d3d12_draw_triangle(D3D12Backend* backend)
     backend->command_list->lpVtbl->SetPipelineState(backend->command_list, backend->pipeline_state);
     backend->command_list->lpVtbl->SetGraphicsRootSignature(backend->command_list,
                                                              backend->root_signature);
+
+    /* Bind constant buffer (root CBV at slot 0) */
+    D3D12_GPU_VIRTUAL_ADDRESS cb_address =
+        backend->constant_buffers[backend->frame_index]->lpVtbl->GetGPUVirtualAddress(
+            backend->constant_buffers[backend->frame_index]);
+    backend->command_list->lpVtbl->SetGraphicsRootConstantBufferView(backend->command_list, 0,
+                                                                      cb_address);
 
     /* Set vertex buffer */
     backend->command_list->lpVtbl->IASetVertexBuffers(backend->command_list, 0, 1,

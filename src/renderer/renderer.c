@@ -294,6 +294,24 @@ void renderer_clear(Renderer* renderer, f32 r, f32 g, f32 b, f32 a)
     }
 }
 
+void renderer_set_transform(Renderer* renderer, const float* mvp)
+{
+    if (!renderer || !mvp)
+        return;
+
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            d3d12_set_transform(&renderer->d3d12, mvp);
+            break;
+#endif
+        default:
+            (void)mvp;
+            break;
+    }
+}
+
 void renderer_draw_triangle(Renderer* renderer)
 {
     if (!renderer)

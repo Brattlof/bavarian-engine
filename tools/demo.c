@@ -9,6 +9,7 @@
  */
 
 #include <bavarian3d/arena.h>
+#include <bavarian3d/camera.h>
 #include <bavarian3d/math.h>
 #include <bavarian3d/memory.h>
 #include <bavarian3d/renderer.h>
@@ -166,6 +167,14 @@ int main(int argc, char** argv)
     printf("Entities created. Total: %u\n", bav_entity_count(ecs));
     printf("Archetypes: %u\n", bav_archetype_count(ecs));
 
+    /* Initialize camera */
+    Camera cam;
+    camera_init(&cam);
+    camera_set_perspective(&cam, math_radians(60.0f),
+                           (f32)window_desc.width / (f32)window_desc.height, 0.1f, 100.0f);
+    camera_set_position(&cam, vec3(0.0f, 0.0f, 2.0f));
+    printf("Camera initialized\n");
+
     /* Main loop */
     printf("\nStarting main loop (press close button or ESC to exit)...\n");
 
@@ -189,6 +198,14 @@ int main(int argc, char** argv)
             f32 b = (sinf(time * 1.1f) + 1.0f) * 0.5f * 0.3f + 0.3f;
 
             renderer_clear(renderer, r, g, b, 1.0f);
+
+            /* Rotate the triangle around Y axis */
+            f32 angle = time * 1.0f;
+            Mat4 model = mat4_rotate_y(angle);
+            Mat4 view_proj = camera_get_view_projection(&cam);
+            Mat4 mvp = mat4_mul(view_proj, model);
+
+            renderer_set_transform(renderer, (const float*)&mvp);
             renderer_draw_triangle(renderer);
             renderer_end_frame(renderer);
         }

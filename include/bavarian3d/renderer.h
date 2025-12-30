@@ -132,6 +132,14 @@ extern "C"
     void renderer_clear(Renderer* renderer, f32 r, f32 g, f32 b, f32 a);
 
     /**
+     * Set the MVP transform matrix for subsequent draw calls.
+     * Must be called between begin_frame and end_frame.
+     *
+     * @param mvp 16-float column-major MVP matrix
+     */
+    void renderer_set_transform(Renderer* renderer, const float* mvp);
+
+    /**
      * Draw a test triangle.
      * Temporary function for testing the rendering pipeline.
      * Must be called between begin_frame and end_frame, after clear.

@@ -1,4 +1,9 @@
-// Simple colored triangle shader
+// Colored triangle shader with MVP transform
+
+cbuffer TransformBuffer : register(b0)
+{
+    float4x4 mvp;
+};
 
 struct VSInput
 {
@@ -15,7 +20,7 @@ struct VSOutput
 VSOutput VSMain(VSInput input)
 {
     VSOutput output;
-    output.position = float4(input.position, 1.0);
+    output.position = mul(mvp, float4(input.position, 1.0));
     output.color = input.color;
     return output;
 }

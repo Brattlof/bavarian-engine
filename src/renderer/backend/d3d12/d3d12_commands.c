@@ -201,6 +201,10 @@ void d3d12_backend_resize(D3D12Backend* backend, u32 width, u32 height)
     /* Recreate render targets */
     recreate_render_targets(backend);
 
+    /* Recreate depth buffer with new dimensions */
+    d3d12_destroy_depth_buffer(backend);
+    d3d12_create_depth_buffer(backend);
+
     /* Reset fence values */
     for (UINT i = 0; i < D3D12_FRAME_COUNT; i++)
     {
@@ -222,14 +226,22 @@ void d3d12_backend_clear(D3D12Backend* backend, f32 r, f32 g, f32 b, f32 a)
     backend->rtv_heap->lpVtbl->GetCPUDescriptorHandleForHeapStart(backend->rtv_heap, &rtv_handle);
     rtv_handle.ptr += (SIZE_T)(backend->frame_index * backend->rtv_descriptor_size);
 
+    /* Get DSV handle for depth buffer */
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv_handle;
+    backend->dsv_heap->lpVtbl->GetCPUDescriptorHandleForHeapStart(backend->dsv_heap, &dsv_handle);
+
     /* Clear the render target */
     FLOAT clear_color[4] = {r, g, b, a};
     backend->command_list->lpVtbl->ClearRenderTargetView(backend->command_list, rtv_handle,
                                                          clear_color, 0, NULL);
 
-    /* Set render target */
+    /* Clear the depth buffer */
+    backend->command_list->lpVtbl->ClearDepthStencilView(backend->command_list, dsv_handle,
+                                                         D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, NULL);
+
+    /* Set render target with depth buffer */
     backend->command_list->lpVtbl->OMSetRenderTargets(backend->command_list, 1, &rtv_handle, FALSE,
-                                                      NULL);
+                                                      &dsv_handle);
 
     /* Set viewport and scissor */
     D3D12_VIEWPORT viewport = {0};

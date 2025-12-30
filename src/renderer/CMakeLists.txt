@@ -22,3 +22,8 @@ target_link_libraries(bavarian_renderer PRIVATE
     bavarian_core
     bavarian_platform
 )
+
+# D3D12 backend (Windows only)
+if(BAV_ENABLE_D3D12 AND WIN32)
+    target_compile_definitions(bavarian_renderer PRIVATE BAV3D_D3D12=1)
+endif()

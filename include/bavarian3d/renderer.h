@@ -121,6 +121,16 @@ extern "C"
      */
     u32 renderer_get_frame_index(const Renderer* renderer);
 
+    /* =============================================================================
+     * Render Commands
+     * ============================================================================= */
+
+    /**
+     * Clear the current render target to a solid color.
+     * Must be called between begin_frame and end_frame.
+     */
+    void renderer_clear(Renderer* renderer, f32 r, f32 g, f32 b, f32 a);
+
 #ifdef __cplusplus
 }
 #endif

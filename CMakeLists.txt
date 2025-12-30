@@ -137,6 +137,9 @@ add_library(bavarian-runtime STATIC
     $<TARGET_OBJECTS:bavarian_platform>
     $<TARGET_OBJECTS:bavarian_ecs>
     $<TARGET_OBJECTS:bavarian_renderer>
+    $<TARGET_OBJECTS:bavarian_renderer_backend>
+    $<TARGET_OBJECTS:bavarian_renderer_frontend>
+    $<TARGET_OBJECTS:bavarian_renderer_graph>
     $<TARGET_OBJECTS:bavarian_resources>
     $<TARGET_OBJECTS:bavarian_scene>
     $<TARGET_OBJECTS:bavarian_scripting>

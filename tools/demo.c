@@ -11,10 +11,12 @@
 #include <bavarian3d/arena.h>
 #include <bavarian3d/math.h>
 #include <bavarian3d/memory.h>
+#include <bavarian3d/renderer.h>
 #include <bavarian3d/types.h>
 #include <bavarian3d/window.h>
 
 #include <bavarian/ecs.h>
+#include <math.h>
 #include <stdio.h>
 
 /* =============================================================================
@@ -86,11 +88,29 @@ int main(int argc, char** argv)
     }
     printf("Window created: %dx%d\n", window_desc.width, window_desc.height);
 
+    /* Create renderer */
+    RendererConfig render_config = {0};
+    render_config.backend = RENDERER_BACKEND_D3D12;
+    render_config.enable_vsync = true;
+    render_config.max_frames_in_flight = 2;
+    render_config.window_handle = window_get_native_handle(window);
+
+    Renderer* renderer = renderer_create(&render_config);
+    if (!renderer)
+    {
+        printf("ERROR: Failed to create renderer\n");
+        window_destroy(window);
+        return 1;
+    }
+    printf("Renderer initialized: %s\n",
+           renderer_get_backend(renderer) == RENDERER_BACKEND_D3D12 ? "D3D12" : "Software");
+
     /* Create ECS */
     BavEntityAdmin* ecs = bav_entity_admin_create(NULL);
     if (!ecs)
     {
         printf("ERROR: Failed to create ECS\n");
+        renderer_destroy(renderer);
         window_destroy(window);
         return 1;
     }
@@ -159,6 +179,19 @@ int main(int argc, char** argv)
         /* Update ECS */
         bav_systems_update(ecs, dt);
 
+        /* Render */
+        if (renderer_begin_frame(renderer))
+        {
+            /* Animate the clear color */
+            f32 time = (f32)frame_count * dt;
+            f32 r = (sinf(time * 0.5f) + 1.0f) * 0.5f * 0.2f + 0.1f;
+            f32 g = (sinf(time * 0.7f) + 1.0f) * 0.5f * 0.2f + 0.2f;
+            f32 b = (sinf(time * 1.1f) + 1.0f) * 0.5f * 0.3f + 0.3f;
+
+            renderer_clear(renderer, r, g, b, 1.0f);
+            renderer_end_frame(renderer);
+        }
+
         frame_count++;
 
         /* Print status every 60 frames */
@@ -168,8 +201,9 @@ int main(int argc, char** argv)
                    bav_archetype_count(ecs));
         }
 
-        /* Exit after a few seconds for testing */
-        if (frame_count >= 300)
+        /* For automated testing, exit after some frames */
+        /* Remove or increase this limit for interactive use */
+        if (frame_count >= 600)
         {
             printf("Demo complete after %u frames\n", frame_count);
             break;
@@ -179,6 +213,7 @@ int main(int argc, char** argv)
     /* Cleanup */
     printf("\nShutting down...\n");
     bav_entity_admin_destroy(ecs);
+    renderer_destroy(renderer);
     window_destroy(window);
     printf("Demo finished.\n");
 

@@ -14,6 +14,10 @@
 #include <bavarian3d/platform.h>
 #include <bavarian3d/renderer.h>
 
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+    #include "backend/d3d12/d3d12_backend.h"
+#endif
+
 /* =============================================================================
  * Renderer State
  * ============================================================================= */
@@ -27,8 +31,10 @@ struct Renderer
     u32 max_frames_in_flight;
     b8 vsync_enabled;
 
-    /* Backend-specific state - will be a union or pointer to backend data */
-    void* backend_data;
+    /* Backend-specific state */
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+    D3D12Backend d3d12;
+#endif
 };
 
 /* =============================================================================
@@ -98,9 +104,43 @@ Renderer* renderer_create(const RendererConfig* config)
     renderer->vsync_enabled = config->enable_vsync;
     renderer->frame_index = 0;
 
-    /* TODO: Initialize selected backend */
-    /* For now this is a skeleton - real implementation will call into
-     * backend-specific init functions */
+    /* Get window dimensions */
+    /* TODO: Get actual dimensions from window handle */
+    renderer->width = 1280;
+    renderer->height = 720;
+
+    /* Initialize selected backend */
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+        {
+            HWND hwnd = (HWND)config->window_handle;
+            RECT rect;
+            if (GetClientRect(hwnd, &rect))
+            {
+                renderer->width = (u32)(rect.right - rect.left);
+                renderer->height = (u32)(rect.bottom - rect.top);
+            }
+
+            if (!d3d12_backend_init(&renderer->d3d12, hwnd, renderer->width, renderer->height,
+                                    renderer->vsync_enabled))
+            {
+                MEM_FREE_TYPE(NULL, renderer, Renderer);
+                return NULL;
+            }
+            break;
+        }
+#endif
+        case RENDERER_BACKEND_SOFTWARE:
+            /* Software renderer - no GPU init needed */
+            break;
+
+        default:
+            /* Unsupported backend */
+            MEM_FREE_TYPE(NULL, renderer, Renderer);
+            return NULL;
+    }
 
     return renderer;
 }
@@ -112,7 +152,17 @@ void renderer_destroy(Renderer* renderer)
 
     renderer_wait_idle(renderer);
 
-    /* TODO: Destroy backend resources */
+    /* Destroy backend resources */
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            d3d12_backend_shutdown(&renderer->d3d12);
+            break;
+#endif
+        default:
+            break;
+    }
 
     MEM_FREE_TYPE(NULL, renderer, Renderer);
 }
@@ -122,8 +172,16 @@ void renderer_wait_idle(Renderer* renderer)
     if (!renderer)
         return;
 
-    /* TODO: Call backend-specific wait idle */
-    (void)renderer;
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            d3d12_backend_wait_idle(&renderer->d3d12);
+            break;
+#endif
+        default:
+            break;
+    }
 }
 
 /* =============================================================================
@@ -135,9 +193,15 @@ b8 renderer_begin_frame(Renderer* renderer)
     if (!renderer)
         return false;
 
-    /* TODO: Acquire swapchain image via backend */
-
-    return true;
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            return d3d12_backend_begin_frame(&renderer->d3d12);
+#endif
+        default:
+            return true;
+    }
 }
 
 void renderer_end_frame(Renderer* renderer)
@@ -145,9 +209,18 @@ void renderer_end_frame(Renderer* renderer)
     if (!renderer)
         return;
 
-    /* TODO: Submit and present via backend */
-
-    renderer->frame_index = (renderer->frame_index + 1) % renderer->max_frames_in_flight;
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            d3d12_backend_end_frame(&renderer->d3d12);
+            renderer->frame_index = renderer->d3d12.frame_index;
+            break;
+#endif
+        default:
+            renderer->frame_index = (renderer->frame_index + 1) % renderer->max_frames_in_flight;
+            break;
+    }
 }
 
 void renderer_resize(Renderer* renderer, u32 width, u32 height)
@@ -162,7 +235,16 @@ void renderer_resize(Renderer* renderer, u32 width, u32 height)
     renderer->width = width;
     renderer->height = height;
 
-    /* TODO: Recreate swapchain via backend */
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            d3d12_backend_resize(&renderer->d3d12, width, height);
+            break;
+#endif
+        default:
+            break;
+    }
 }
 
 /* =============================================================================
@@ -185,4 +267,29 @@ RendererBackend renderer_get_backend(const Renderer* renderer)
 u32 renderer_get_frame_index(const Renderer* renderer)
 {
     return renderer ? renderer->frame_index : 0;
+}
+
+/* =============================================================================
+ * Render Commands
+ * ============================================================================= */
+
+void renderer_clear(Renderer* renderer, f32 r, f32 g, f32 b, f32 a)
+{
+    if (!renderer)
+        return;
+
+    switch (renderer->backend)
+    {
+#if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
+        case RENDERER_BACKEND_D3D12:
+            d3d12_backend_clear(&renderer->d3d12, r, g, b, a);
+            break;
+#endif
+        default:
+            (void)r;
+            (void)g;
+            (void)b;
+            (void)a;
+            break;
+    }
 }

@@ -19,17 +19,14 @@ if(BAV_ENABLE_VULKAN)
     target_compile_definitions(bavarian_renderer_backend PRIVATE BAV_VULKAN=1)
 endif()
 
-# D3D12 backend (Windows only) - not yet implemented
-# if(BAV_ENABLE_D3D12 AND WIN32)
-#     target_sources(bavarian_renderer_backend PRIVATE
-#         d3d12/d3d12_device.c
-#         d3d12/d3d12_buffer.c
-#         d3d12/d3d12_texture.c
-#         d3d12/d3d12_pipeline.c
-#         d3d12/d3d12_commands.c
-#     )
-#     target_compile_definitions(bavarian_renderer_backend PRIVATE BAV_D3D12=1)
-# endif()
+# D3D12 backend (Windows only)
+if(BAV_ENABLE_D3D12 AND WIN32)
+    target_sources(bavarian_renderer_backend PRIVATE
+        d3d12/d3d12_device.c
+        d3d12/d3d12_commands.c
+    )
+    target_compile_definitions(bavarian_renderer_backend PUBLIC BAV3D_D3D12=1)
+endif()
 
 target_include_directories(bavarian_renderer_backend PUBLIC
     ${CMAKE_SOURCE_DIR}/include

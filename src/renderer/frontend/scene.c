@@ -1,63 +1,104 @@
 /**
  * @file scene.c
- * @brief Scene graph management
+ * @brief Scene management for rendering
  *
- * Handles the logical representation of renderable objects.
- * This is what Lua scripts interact with - the "what to render" layer.
+ * Simple scene container for rendering multiple objects with different
+ * transforms and materials. This is the renderer's view of a scene -
+ * the full scene graph system lives in src/scene/.
  */
 
-#include <bavarian3d/math.h>
-#include <bavarian3d/memory.h>
-#include <bavarian3d/types.h>
+#include <bavarian3d/scene.h>
 
-/* Placeholder - actual implementation will be more substantial */
+#include <string.h>
 
-typedef struct SceneNode SceneNode;
-typedef struct Scene Scene;
+/* =============================================================================
+ * Scene Lifecycle
+ * ============================================================================= */
 
-struct SceneNode
-{
-    Handle handle;
-    Handle parent;
-    Handle mesh;
-    Handle material;
-    Mat4 local_transform;
-    Mat4 world_transform;
-    b8 dirty;
-};
-
-struct Scene
-{
-    Allocator* allocator;
-    SceneNode* nodes;
-    u32 node_count;
-    u32 node_capacity;
-};
-
-Scene* scene_create(Allocator* allocator)
-{
-    Scene* scene = MEM_ALLOC_TYPE_ZERO(allocator, Scene);
-    if (!scene)
-        return NULL;
-
-    scene->allocator = allocator;
-    scene->node_capacity = 1024;
-    scene->nodes = MEM_ALLOC_ARRAY_ZERO(allocator, SceneNode, scene->node_capacity);
-
-    if (!scene->nodes)
-    {
-        MEM_FREE_TYPE(allocator, scene, Scene);
-        return NULL;
-    }
-
-    return scene;
-}
-
-void scene_destroy(Scene* scene)
+void scene_init(Scene* scene)
 {
     if (!scene)
         return;
 
-    MEM_FREE_ARRAY(scene->allocator, scene->nodes, SceneNode, scene->node_capacity);
-    MEM_FREE_TYPE(scene->allocator, scene, Scene);
+    memset(scene, 0, sizeof(Scene));
+    scene->view_projection = mat4_identity();
+}
+
+void scene_clear(Scene* scene)
+{
+    if (!scene)
+        return;
+
+    memset(scene->objects, 0, sizeof(scene->objects));
+    scene->object_count = 0;
+}
+
+/* =============================================================================
+ * Object Management
+ * ============================================================================= */
+
+i32 scene_add_object(Scene* scene, Mesh* mesh, const Material* material, const Mat4* transform)
+{
+    if (!scene || !mesh)
+        return -1;
+
+    if (scene->object_count >= SCENE_MAX_OBJECTS)
+        return -1;
+
+    /* Find first empty slot */
+    for (u32 i = 0; i < SCENE_MAX_OBJECTS; i++)
+    {
+        if (scene->objects[i].mesh == NULL)
+        {
+            RenderObject* obj = &scene->objects[i];
+            obj->mesh = mesh;
+            obj->material = material ? *material : material_default();
+            obj->transform = transform ? *transform : mat4_identity();
+            obj->visible = true;
+            scene->object_count++;
+            return (i32)i;
+        }
+    }
+
+    return -1;
+}
+
+void scene_remove_object(Scene* scene, i32 handle)
+{
+    if (!scene || handle < 0 || handle >= SCENE_MAX_OBJECTS)
+        return;
+
+    if (scene->objects[handle].mesh != NULL)
+    {
+        memset(&scene->objects[handle], 0, sizeof(RenderObject));
+        scene->object_count--;
+    }
+}
+
+RenderObject* scene_get_object(Scene* scene, i32 handle)
+{
+    if (!scene || handle < 0 || handle >= SCENE_MAX_OBJECTS)
+        return NULL;
+
+    if (scene->objects[handle].mesh == NULL)
+        return NULL;
+
+    return &scene->objects[handle];
+}
+
+void scene_set_camera(Scene* scene, const Mat4* view_projection)
+{
+    if (!scene || !view_projection)
+        return;
+
+    scene->view_projection = *view_projection;
+}
+
+/* =============================================================================
+ * Queries
+ * ============================================================================= */
+
+u32 scene_object_count(const Scene* scene)
+{
+    return scene ? scene->object_count : 0;
 }

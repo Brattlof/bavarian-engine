@@ -180,6 +180,23 @@ extern "C"
      */
     void renderer_draw_mesh(Renderer* renderer);
 
+    /* =============================================================================
+     * Scene Rendering
+     * ============================================================================= */
+
+    /* Forward declaration */
+    struct Scene;
+
+    /**
+     * Render all visible objects in a scene.
+     * Iterates through the scene's objects, uploading each mesh and rendering
+     * with its transform and material.
+     *
+     * @param renderer The renderer
+     * @param scene The scene to render
+     */
+    void renderer_draw_scene(Renderer* renderer, struct Scene* scene);
+
 #ifdef __cplusplus
 }
 #endif

@@ -510,11 +510,20 @@ b8 d3d12_upload_mesh(D3D12Backend* backend, const void* vertices, u32 vertex_cou
 {
     HRESULT hr;
 
-    /* Clean up any existing mesh */
-    d3d12_destroy_mesh(backend);
-
     if (!vertices || vertex_count == 0 || vertex_stride == 0)
         return false;
+
+    /*
+     * If we already have a mesh buffer, we need to wait for the GPU to finish
+     * using it before we can destroy and recreate it. This is a performance
+     * hit but ensures correctness. A proper resource manager would use
+     * per-frame buffers or a ring buffer.
+     */
+    if (backend->mesh_vertex_buffer)
+    {
+        d3d12_backend_wait_idle(backend);
+        d3d12_destroy_mesh(backend);
+    }
 
     /* Create vertex buffer */
     D3D12_HEAP_PROPERTIES heap_props = {0};

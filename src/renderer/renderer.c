@@ -11,8 +11,10 @@
  */
 
 #include <bavarian3d/memory.h>
+#include <bavarian3d/mesh.h>
 #include <bavarian3d/platform.h>
 #include <bavarian3d/renderer.h>
+#include <bavarian3d/scene.h>
 
 #if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
     #include "backend/d3d12/d3d12_backend.h"
@@ -30,6 +32,9 @@ struct Renderer
     u32 frame_index;
     u32 max_frames_in_flight;
     b8 vsync_enabled;
+
+    /* Track last uploaded mesh to avoid redundant uploads */
+    Mesh* last_uploaded_mesh;
 
     /* Backend-specific state */
 #if defined(BAV3D_PLATFORM_WINDOWS) && defined(BAV3D_D3D12)
@@ -396,5 +401,50 @@ void renderer_draw_mesh(Renderer* renderer)
 #endif
         default:
             break;
+    }
+}
+
+/* =============================================================================
+ * Scene Rendering
+ * ============================================================================= */
+
+void renderer_draw_scene(Renderer* renderer, Scene* scene)
+{
+    if (!renderer || !scene)
+        return;
+
+    /* Iterate through all objects in the scene */
+    for (u32 i = 0; i < SCENE_MAX_OBJECTS; i++)
+    {
+        RenderObject* obj = &scene->objects[i];
+
+        /* Skip inactive or invisible objects */
+        if (obj->mesh == NULL || !obj->visible)
+            continue;
+
+        /*
+         * Only upload mesh if it's different from what we have uploaded.
+         * This avoids GPU stalls from destroying resources in use.
+         */
+        if (obj->mesh != renderer->last_uploaded_mesh)
+        {
+            if (!renderer_upload_mesh(renderer, obj->mesh->vertices, obj->mesh->vertex_count,
+                                      obj->mesh->vertex_stride, obj->mesh->indices,
+                                      obj->mesh->index_count))
+            {
+                continue;
+            }
+            renderer->last_uploaded_mesh = obj->mesh;
+        }
+
+        /* Compute MVP: view_projection * model */
+        Mat4 mvp = mat4_mul(scene->view_projection, obj->transform);
+
+        /* Set transform and material */
+        renderer_set_transform(renderer, (const float*)&mvp);
+        renderer_set_material(renderer, (const float*)&obj->material);
+
+        /* Draw the mesh */
+        renderer_draw_mesh(renderer);
     }
 }

@@ -5,6 +5,7 @@
  * Simple demonstration of the engine's core systems:
  * - Platform layer (window, input, timing)
  * - Entity Component System
+ * - Renderer with scene management
  * - Memory management
  */
 
@@ -15,6 +16,7 @@
 #include <bavarian3d/memory.h>
 #include <bavarian3d/mesh.h>
 #include <bavarian3d/renderer.h>
+#include <bavarian3d/scene.h>
 #include <bavarian3d/types.h>
 #include <bavarian3d/window.h>
 
@@ -39,11 +41,11 @@ typedef struct Velocity
     Vec3 angular;
 } Velocity;
 
-typedef struct RenderMesh
+typedef struct RenderMeshComp
 {
     u32 mesh_id;
     u32 material_id;
-} RenderMesh;
+} RenderMeshComp;
 
 /* =============================================================================
  * Demo Systems
@@ -122,8 +124,8 @@ int main(int argc, char** argv)
     /* Register components */
     g_transform_id = BAV_REGISTER_COMPONENT(ecs, Transform);
     g_velocity_id = BAV_REGISTER_COMPONENT(ecs, Velocity);
-    BavComponentId mesh_id = BAV_REGISTER_COMPONENT(ecs, RenderMesh);
-    printf("Components registered: Transform, Velocity, RenderMesh\n");
+    BavComponentId mesh_id = BAV_REGISTER_COMPONENT(ecs, RenderMeshComp);
+    printf("Components registered: Transform, Velocity, RenderMeshComp\n");
 
     /* Register systems */
     BavSystemDef physics_def = {0};
@@ -158,7 +160,7 @@ int main(int argc, char** argv)
 
         if (i % 2 == 0)
         {
-            RenderMesh rm = {0};
+            RenderMeshComp rm = {0};
             rm.mesh_id = 1;
             rm.material_id = i % 10;
             bav_entity_add_component(ecs, e, mesh_id, &rm);
@@ -169,23 +171,62 @@ int main(int argc, char** argv)
     printf("Entities created. Total: %u\n", bav_entity_count(ecs));
     printf("Archetypes: %u\n", bav_archetype_count(ecs));
 
-    /* Initialize camera */
+    /* Initialize camera - pull back to see all cubes */
     Camera cam;
     camera_init(&cam);
     camera_set_perspective(&cam, math_radians(60.0f),
                            (f32)window_desc.width / (f32)window_desc.height, 0.1f, 100.0f);
-    camera_set_position(&cam, vec3(0.0f, 1.0f, 3.0f));
+    camera_set_position(&cam, vec3(0.0f, 2.0f, 8.0f));
     printf("Camera initialized\n");
 
-    /* Create and upload a cube mesh */
+    /* Create a cube mesh */
     Mesh* cube = mesh_create_cube();
-    if (cube)
+    if (!cube)
     {
-        renderer_upload_mesh(renderer, cube->vertices, cube->vertex_count, cube->vertex_stride,
-                             cube->indices, cube->index_count);
-        printf("Cube mesh created: %u vertices, %u indices\n", cube->vertex_count,
-               cube->index_count);
+        printf("ERROR: Failed to create cube mesh\n");
+        bav_entity_admin_destroy(ecs);
+        renderer_destroy(renderer);
+        window_destroy(window);
+        return 1;
     }
+    printf("Cube mesh created: %u vertices, %u indices\n", cube->vertex_count, cube->index_count);
+
+    /* Create a render scene with multiple cubes */
+    Scene render_scene;
+    scene_init(&render_scene);
+
+    /* Create a 3x3 grid of cubes with different colors */
+    i32 cube_handles[9];
+    const f32 spacing = 2.0f;
+
+    /* Color palette for the cubes */
+    Material colors[9] = {
+        {{1.0f, 0.3f, 0.3f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Red */
+        {{0.3f, 1.0f, 0.3f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Green */
+        {{0.3f, 0.3f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Blue */
+        {{1.0f, 1.0f, 0.3f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Yellow */
+        {{1.0f, 0.3f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Magenta */
+        {{0.3f, 1.0f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Cyan */
+        {{1.0f, 0.6f, 0.3f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Orange */
+        {{0.6f, 0.3f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* Purple */
+        {{1.0f, 1.0f, 1.0f, 1.0f}, 0.0f, 0.5f, 0.0f, 0.0f}, /* White */
+    };
+
+    for (i32 row = 0; row < 3; row++)
+    {
+        for (i32 col = 0; col < 3; col++)
+        {
+            i32 idx = row * 3 + col;
+            f32 x = (col - 1) * spacing;
+            f32 y = 0.0f;
+            f32 z = (row - 1) * spacing;
+
+            Mat4 transform = mat4_translate(vec3(x, y, z));
+            cube_handles[idx] = scene_add_object(&render_scene, cube, &colors[idx], &transform);
+        }
+    }
+
+    printf("Scene created with %u objects\n", scene_object_count(&render_scene));
 
     /* Main loop */
     printf("\nStarting main loop (press close button or ESC to exit)...\n");
@@ -200,85 +241,44 @@ int main(int argc, char** argv)
         /* Update ECS */
         bav_systems_update(ecs, dt);
 
+        /* Update cube transforms - each cube rotates at a different speed */
+        f32 time = (f32)frame_count * dt;
+        for (i32 i = 0; i < 9; i++)
+        {
+            RenderObject* obj = scene_get_object(&render_scene, cube_handles[i]);
+            if (obj)
+            {
+                i32 row = i / 3;
+                i32 col = i % 3;
+                f32 x = (col - 1) * spacing;
+                f32 z = (row - 1) * spacing;
+
+                /* Each cube has slightly different rotation speed */
+                f32 speed = 0.3f + (f32)i * 0.1f;
+                f32 angle_y = time * speed;
+                f32 angle_x = time * speed * 0.7f;
+
+                Mat4 trans = mat4_translate(vec3(x, 0.0f, z));
+                Mat4 rot_y = mat4_rotate_y(angle_y);
+                Mat4 rot_x = mat4_rotate_x(angle_x);
+                Mat4 rot = mat4_mul(rot_y, rot_x);
+                obj->transform = mat4_mul(trans, rot);
+            }
+        }
+
         /* Render */
         if (renderer_begin_frame(renderer))
         {
-            /* Animate the clear color */
-            f32 time = (f32)frame_count * dt;
-            f32 r = (sinf(time * 0.5f) + 1.0f) * 0.5f * 0.2f + 0.1f;
-            f32 g = (sinf(time * 0.7f) + 1.0f) * 0.5f * 0.2f + 0.2f;
-            f32 b = (sinf(time * 1.1f) + 1.0f) * 0.5f * 0.3f + 0.3f;
+            /* Darker background to make cubes pop */
+            renderer_clear(renderer, 0.1f, 0.1f, 0.15f, 1.0f);
 
-            renderer_clear(renderer, r, g, b, 1.0f);
-
-            /* Rotate the cube around Y axis (and a bit on X for interest) */
-            f32 angle_y = time * 0.5f;
-            f32 angle_x = time * 0.3f;
-            Mat4 rot_y = mat4_rotate_y(angle_y);
-            Mat4 rot_x = mat4_rotate_x(angle_x);
-            Mat4 model = mat4_mul(rot_y, rot_x);
+            /* Set the camera's view-projection matrix on the scene */
             Mat4 view_proj = camera_get_view_projection(&cam);
-            Mat4 mvp = mat4_mul(view_proj, model);
+            scene_set_camera(&render_scene, &view_proj);
 
-            renderer_set_transform(renderer, (const float*)&mvp);
+            /* Render all objects in the scene */
+            renderer_draw_scene(renderer, &render_scene);
 
-            /* Animate material color (cycle through hue) */
-            f32 hue = fmodf(time * 0.2f, 1.0f);
-            f32 sat = 0.7f;
-            f32 val = 1.0f;
-            /* HSV to RGB conversion */
-            f32 h6 = hue * 6.0f;
-            f32 c = val * sat;
-            f32 x = c * (1.0f - fabsf(fmodf(h6, 2.0f) - 1.0f));
-            f32 m = val - c;
-            f32 mr, mg, mb;
-            if (h6 < 1.0f)
-            {
-                mr = c;
-                mg = x;
-                mb = 0.0f;
-            }
-            else if (h6 < 2.0f)
-            {
-                mr = x;
-                mg = c;
-                mb = 0.0f;
-            }
-            else if (h6 < 3.0f)
-            {
-                mr = 0.0f;
-                mg = c;
-                mb = x;
-            }
-            else if (h6 < 4.0f)
-            {
-                mr = 0.0f;
-                mg = x;
-                mb = c;
-            }
-            else if (h6 < 5.0f)
-            {
-                mr = x;
-                mg = 0.0f;
-                mb = c;
-            }
-            else
-            {
-                mr = c;
-                mg = 0.0f;
-                mb = x;
-            }
-            Material mat = material_from_color(mr + m, mg + m, mb + m, 1.0f);
-            renderer_set_material(renderer, (const float*)&mat);
-
-            if (cube)
-            {
-                renderer_draw_mesh(renderer);
-            }
-            else
-            {
-                renderer_draw_triangle(renderer);
-            }
             renderer_end_frame(renderer);
         }
 
@@ -287,12 +287,11 @@ int main(int argc, char** argv)
         /* Print status every 60 frames */
         if (frame_count % 60 == 0)
         {
-            printf("Frame %u - Entities: %u, Archetypes: %u\n", frame_count, bav_entity_count(ecs),
-                   bav_archetype_count(ecs));
+            printf("Frame %u - Entities: %u, Archetypes: %u, Scene Objects: %u\n", frame_count,
+                   bav_entity_count(ecs), bav_archetype_count(ecs), scene_object_count(&render_scene));
         }
 
         /* For automated testing, exit after some frames */
-        /* Remove or increase this limit for interactive use */
         if (frame_count >= 600)
         {
             printf("Demo complete after %u frames\n", frame_count);
@@ -302,11 +301,9 @@ int main(int argc, char** argv)
 
     /* Cleanup */
     printf("\nShutting down...\n");
-    if (cube)
-    {
-        renderer_destroy_mesh(renderer);
-        mesh_destroy(cube);
-    }
+    scene_clear(&render_scene);
+    renderer_destroy_mesh(renderer);
+    mesh_destroy(cube);
     bav_entity_admin_destroy(ecs);
     renderer_destroy(renderer);
     window_destroy(window);

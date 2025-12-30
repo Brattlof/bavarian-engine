@@ -134,18 +134,33 @@ void d3d12_backend_end_frame(D3D12Backend* backend)
     ID3D12CommandList* cmd_lists[] = {(ID3D12CommandList*)backend->command_list};
     backend->command_queue->lpVtbl->ExecuteCommandLists(backend->command_queue, 1, cmd_lists);
 
+    /*
+     * Signal and wait for GPU to finish before Present.
+     * This is more conservative than typical async patterns but works reliably.
+     * TODO: Investigate why async present fails with DEVICE_HUNG on this system.
+     */
+    backend->fence_values[backend->frame_index]++;
+    hr = backend->command_queue->lpVtbl->Signal(backend->command_queue, backend->fence,
+                                                backend->fence_values[backend->frame_index]);
+    if (SUCCEEDED(hr))
+    {
+        if (backend->fence->lpVtbl->GetCompletedValue(backend->fence) <
+            backend->fence_values[backend->frame_index])
+        {
+            backend->fence->lpVtbl->SetEventOnCompletion(
+                backend->fence, backend->fence_values[backend->frame_index], backend->fence_event);
+            WaitForSingleObject(backend->fence_event, INFINITE);
+        }
+    }
+
     /* Present */
     UINT sync_interval = backend->vsync ? 1 : 0;
     hr = backend->swapchain->lpVtbl->Present(backend->swapchain, sync_interval, 0);
     if (FAILED(hr))
     {
-        fprintf(stderr, "D3D12: Present failed (hr=0x%08lX)\n", hr);
+        HRESULT reason = backend->device->lpVtbl->GetDeviceRemovedReason(backend->device);
+        fprintf(stderr, "D3D12: Present failed (hr=0x%08lX, reason=0x%08lX)\n", hr, reason);
     }
-
-    /* Signal fence for this frame */
-    backend->fence_values[backend->frame_index]++;
-    backend->command_queue->lpVtbl->Signal(backend->command_queue, backend->fence,
-                                           backend->fence_values[backend->frame_index]);
 
     /* Move to next frame */
     backend->frame_index =

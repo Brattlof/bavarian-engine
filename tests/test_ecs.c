@@ -410,6 +410,152 @@ static void test_systems_update(void)
 }
 
 /* =============================================================================
+ * Determinism Tests (E-012)
+ * ============================================================================= */
+
+#define DETERMINISM_ENTITY_COUNT 100
+#define DETERMINISM_FRAME_COUNT 1000
+
+typedef struct DeterminismState
+{
+    f32 positions[DETERMINISM_ENTITY_COUNT][3];
+    f32 velocities[DETERMINISM_ENTITY_COUNT][3];
+} DeterminismState;
+
+typedef struct CaptureData
+{
+    DeterminismState* state;
+    u32 idx;
+} CaptureData;
+
+static void determinism_movement_callback(BavEntity entity, void** components, void* user_data)
+{
+    (void)entity;
+    f32 dt = *(f32*)user_data;
+    Position* pos = components[0];
+    Velocity* vel = components[1];
+
+    pos->x += vel->vx * dt;
+    pos->y += vel->vy * dt;
+    pos->z += vel->vz * dt;
+}
+
+static void capture_state_callback(BavEntity entity, void** components, void* user_data)
+{
+    (void)entity;
+    CaptureData* c = user_data;
+    if (c->idx >= DETERMINISM_ENTITY_COUNT)
+        return;
+
+    Position* pos = components[0];
+    Velocity* vel = components[1];
+    u32 i = c->idx++;
+
+    c->state->positions[i][0] = pos->x;
+    c->state->positions[i][1] = pos->y;
+    c->state->positions[i][2] = pos->z;
+    c->state->velocities[i][0] = vel->vx;
+    c->state->velocities[i][1] = vel->vy;
+    c->state->velocities[i][2] = vel->vz;
+}
+
+static void run_determinism_simulation(BavEntityAdmin* admin, BavComponentId pos_id,
+                                       BavComponentId vel_id, u32 frame_count,
+                                       DeterminismState* out_state)
+{
+    BavComponentId required[] = {pos_id, vel_id};
+    BavQuery query = bav_query_require(required, 2);
+
+    f32 dt = 1.0f / 60.0f;
+
+    for (u32 frame = 0; frame < frame_count; frame++)
+    {
+        bav_query_each(admin, &query, determinism_movement_callback, &dt);
+        bav_entity_admin_flush(admin);
+    }
+
+    /* Capture final state */
+    CaptureData cap = {out_state, 0};
+    bav_query_each(admin, &query, capture_state_callback, &cap);
+}
+
+static BavEntityAdmin* setup_determinism_world(BavComponentId* out_pos_id,
+                                               BavComponentId* out_vel_id)
+{
+    BavEntityAdmin* admin = bav_entity_admin_create(NULL);
+    if (!admin)
+        return NULL;
+
+    *out_pos_id = BAV_REGISTER_COMPONENT(admin, Position);
+    *out_vel_id = BAV_REGISTER_COMPONENT(admin, Velocity);
+
+    /* Create entities with deterministic initial values */
+    for (u32 i = 0; i < DETERMINISM_ENTITY_COUNT; i++)
+    {
+        BavEntity e = bav_entity_create(admin);
+
+        /* Use deterministic "random" values based on index */
+        f32 seed = (f32)(i * 7 + 13);
+        Position pos = {seed * 0.1f, seed * 0.2f, seed * 0.3f};
+
+        f32 vel_seed = (f32)((i * 11 + 17) % 100);
+        Velocity vel = {vel_seed * 0.01f - 0.5f, vel_seed * 0.02f - 1.0f,
+                        vel_seed * 0.015f - 0.75f};
+
+        bav_entity_add_component(admin, e, *out_pos_id, &pos);
+        bav_entity_add_component(admin, e, *out_vel_id, &vel);
+    }
+
+    bav_entity_admin_flush(admin);
+    return admin;
+}
+
+static void test_determinism_basic(void)
+{
+    BavComponentId pos_id1, vel_id1;
+    BavComponentId pos_id2, vel_id2;
+
+    /* Run simulation 1 */
+    BavEntityAdmin* admin1 = setup_determinism_world(&pos_id1, &vel_id1);
+    ASSERT_NOT_NULL(admin1);
+
+    DeterminismState state1 = {0};
+    run_determinism_simulation(admin1, pos_id1, vel_id1, DETERMINISM_FRAME_COUNT, &state1);
+
+    /* Run simulation 2 (fresh admin, same setup) */
+    BavEntityAdmin* admin2 = setup_determinism_world(&pos_id2, &vel_id2);
+    ASSERT_NOT_NULL(admin2);
+
+    DeterminismState state2 = {0};
+    run_determinism_simulation(admin2, pos_id2, vel_id2, DETERMINISM_FRAME_COUNT, &state2);
+
+    /* Compare states - they must be identical */
+    b8 match = 1;
+    for (u32 i = 0; i < DETERMINISM_ENTITY_COUNT && match; i++)
+    {
+        for (u32 j = 0; j < 3; j++)
+        {
+            if (state1.positions[i][j] != state2.positions[i][j])
+            {
+                match = 0;
+                break;
+            }
+            if (state1.velocities[i][j] != state2.velocities[i][j])
+            {
+                match = 0;
+                break;
+            }
+        }
+    }
+
+    ASSERT_TRUE(match);
+
+    bav_entity_admin_destroy(admin1);
+    bav_entity_admin_destroy(admin2);
+    TEST_PASS();
+}
+
+/* =============================================================================
  * Test Suite Entry
  * ============================================================================= */
 
@@ -439,6 +585,9 @@ void test_ecs_suite(void)
     /* System tests */
     RUN_TEST(test_system_register);
     RUN_TEST(test_systems_update);
+
+    /* Determinism tests */
+    RUN_TEST(test_determinism_basic);
 
     TEST_SUITE_END();
 }

@@ -1,8 +1,17 @@
-// Colored triangle shader with MVP transform
+// Colored triangle shader with MVP transform and material support
 
 cbuffer TransformBuffer : register(b0)
 {
     float4x4 mvp;
+};
+
+cbuffer MaterialBuffer : register(b1)
+{
+    float4 base_color;
+    float metallic;
+    float roughness;
+    float emission;
+    float _pad;
 };
 
 struct VSInput
@@ -27,5 +36,11 @@ VSOutput VSMain(VSInput input)
 
 float4 PSMain(VSOutput input) : SV_TARGET
 {
-    return input.color;
+    // Multiply vertex color by material base color
+    float4 color = input.color * base_color;
+
+    // Add emission
+    color.rgb += emission;
+
+    return color;
 }

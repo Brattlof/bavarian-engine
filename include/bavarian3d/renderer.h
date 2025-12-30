@@ -140,6 +140,15 @@ extern "C"
     void renderer_set_transform(Renderer* renderer, const float* mvp);
 
     /**
+     * Set the material parameters for subsequent draw calls.
+     * Must be called between begin_frame and end_frame.
+     *
+     * @param material_data 8-float material data (base_color RGBA, metallic, roughness, emission,
+     * pad)
+     */
+    void renderer_set_material(Renderer* renderer, const float* material_data);
+
+    /**
      * Draw a test triangle.
      * Temporary function for testing the rendering pipeline.
      * Must be called between begin_frame and end_frame, after clear.

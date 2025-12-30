@@ -73,11 +73,15 @@ typedef struct D3D12Backend
     u32 mesh_vertex_count;
     u32 mesh_index_count;
 
-    /* Constant buffers (per-frame for double buffering) */
+    /* Transform constant buffers (per-frame for double buffering) */
     ID3D12Resource* constant_buffers[D3D12_FRAME_COUNT];
     void* constant_buffer_mapped[D3D12_FRAME_COUNT];
     ID3D12DescriptorHeap* cbv_heap;
     u32 cbv_descriptor_size;
+
+    /* Material constant buffers (per-frame for double buffering) */
+    ID3D12Resource* material_buffers[D3D12_FRAME_COUNT];
+    void* material_buffer_mapped[D3D12_FRAME_COUNT];
 
     /* Depth buffer */
     ID3D12Resource* depth_buffer;
@@ -127,6 +131,7 @@ void d3d12_destroy_constant_buffers(D3D12Backend* backend);
 b8 d3d12_create_depth_buffer(D3D12Backend* backend);
 void d3d12_destroy_depth_buffer(D3D12Backend* backend);
 void d3d12_set_transform(D3D12Backend* backend, const float* mvp);
+void d3d12_set_material(D3D12Backend* backend, const float* material_data);
 void d3d12_draw_triangle(D3D12Backend* backend);
 
 /* =============================================================================

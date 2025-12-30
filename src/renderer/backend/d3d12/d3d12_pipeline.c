@@ -29,18 +29,27 @@ b8 d3d12_create_triangle_pipeline(D3D12Backend* backend)
     HRESULT hr;
 
     /*
-     * Root signature with one CBV for the MVP matrix.
-     * Using a root descriptor (not a descriptor table) for simplicity.
+     * Root signature with two CBVs:
+     * - b0: Transform buffer (MVP matrix) - vertex shader
+     * - b1: Material buffer - pixel shader
      */
-    D3D12_ROOT_PARAMETER root_param = {0};
-    root_param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    root_param.Descriptor.ShaderRegister = 0; /* b0 */
-    root_param.Descriptor.RegisterSpace = 0;
-    root_param.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+    D3D12_ROOT_PARAMETER root_params[2] = {0};
+
+    /* Transform CBV at b0 */
+    root_params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    root_params[0].Descriptor.ShaderRegister = 0; /* b0 */
+    root_params[0].Descriptor.RegisterSpace = 0;
+    root_params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+
+    /* Material CBV at b1 */
+    root_params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    root_params[1].Descriptor.ShaderRegister = 1; /* b1 */
+    root_params[1].Descriptor.RegisterSpace = 0;
+    root_params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_ROOT_SIGNATURE_DESC root_sig_desc = {0};
-    root_sig_desc.NumParameters = 1;
-    root_sig_desc.pParameters = &root_param;
+    root_sig_desc.NumParameters = 2;
+    root_sig_desc.pParameters = root_params;
     root_sig_desc.NumStaticSamplers = 0;
     root_sig_desc.pStaticSamplers = NULL;
     root_sig_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -242,6 +251,8 @@ void d3d12_destroy_triangle_buffers(D3D12Backend* backend)
     /* Constant buffer size must be 256-byte aligned */
     #define CB_ALIGN 256
     #define CB_SIZE ((sizeof(float) * 16 + CB_ALIGN - 1) & ~(CB_ALIGN - 1))
+    /* Material: vec4 base_color + 4 floats = 32 bytes, aligned to 256 */
+    #define MAT_SIZE 256
 
 b8 d3d12_create_constant_buffers(D3D12Backend* backend)
 {
@@ -268,8 +279,11 @@ b8 d3d12_create_constant_buffers(D3D12Backend* backend)
     resource_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     resource_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
+    D3D12_RANGE read_range = {0, 0};
+
     for (UINT i = 0; i < D3D12_FRAME_COUNT; i++)
     {
+        /* Create transform constant buffer */
         hr = backend->device->lpVtbl->CreateCommittedResource(
             backend->device, &heap_props, D3D12_HEAP_FLAG_NONE, &resource_desc,
             D3D12_RESOURCE_STATE_GENERIC_READ, NULL, &IID_ID3D12Resource,
@@ -280,8 +294,6 @@ b8 d3d12_create_constant_buffers(D3D12Backend* backend)
             return false;
         }
 
-        /* Keep constant buffers persistently mapped */
-        D3D12_RANGE read_range = {0, 0};
         hr = backend->constant_buffers[i]->lpVtbl->Map(backend->constant_buffers[i], 0, &read_range,
                                                        &backend->constant_buffer_mapped[i]);
         if (FAILED(hr))
@@ -293,6 +305,32 @@ b8 d3d12_create_constant_buffers(D3D12Backend* backend)
         /* Initialize with identity matrix */
         float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
         memcpy(backend->constant_buffer_mapped[i], identity, sizeof(identity));
+
+        /* Create material constant buffer */
+        D3D12_RESOURCE_DESC mat_desc = resource_desc;
+        mat_desc.Width = MAT_SIZE;
+
+        hr = backend->device->lpVtbl->CreateCommittedResource(
+            backend->device, &heap_props, D3D12_HEAP_FLAG_NONE, &mat_desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, NULL, &IID_ID3D12Resource,
+            (void**)&backend->material_buffers[i]);
+        if (FAILED(hr))
+        {
+            fprintf(stderr, "D3D12: Failed to create material buffer %u (hr=0x%08lX)\n", i, hr);
+            return false;
+        }
+
+        hr = backend->material_buffers[i]->lpVtbl->Map(backend->material_buffers[i], 0, &read_range,
+                                                        &backend->material_buffer_mapped[i]);
+        if (FAILED(hr))
+        {
+            fprintf(stderr, "D3D12: Failed to map material buffer %u (hr=0x%08lX)\n", i, hr);
+            return false;
+        }
+
+        /* Initialize with default material (white, non-metallic) */
+        float default_material[8] = {1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.5f, 0.0f, 0.0f};
+        memcpy(backend->material_buffer_mapped[i], default_material, sizeof(default_material));
     }
 
     return true;
@@ -302,6 +340,13 @@ void d3d12_destroy_constant_buffers(D3D12Backend* backend)
 {
     for (UINT i = 0; i < D3D12_FRAME_COUNT; i++)
     {
+        if (backend->material_buffers[i])
+        {
+            backend->material_buffers[i]->lpVtbl->Unmap(backend->material_buffers[i], 0, NULL);
+            backend->material_buffers[i]->lpVtbl->Release(backend->material_buffers[i]);
+            backend->material_buffers[i] = NULL;
+            backend->material_buffer_mapped[i] = NULL;
+        }
         if (backend->constant_buffers[i])
         {
             backend->constant_buffers[i]->lpVtbl->Unmap(backend->constant_buffers[i], 0, NULL);
@@ -318,6 +363,15 @@ void d3d12_set_transform(D3D12Backend* backend, const float* mvp)
         return;
 
     memcpy(backend->constant_buffer_mapped[backend->frame_index], mvp, sizeof(float) * 16);
+}
+
+void d3d12_set_material(D3D12Backend* backend, const float* material_data)
+{
+    if (!backend->material_buffer_mapped[backend->frame_index])
+        return;
+
+    /* Material struct: vec4 base_color, f32 metallic, f32 roughness, f32 emission, f32 _pad */
+    memcpy(backend->material_buffer_mapped[backend->frame_index], material_data, sizeof(float) * 8);
 }
 
 /* =============================================================================
@@ -423,12 +477,19 @@ void d3d12_draw_triangle(D3D12Backend* backend)
     backend->command_list->lpVtbl->SetGraphicsRootSignature(backend->command_list,
                                                             backend->root_signature);
 
-    /* Bind constant buffer (root CBV at slot 0) */
+    /* Bind transform constant buffer (root CBV at slot 0) */
     D3D12_GPU_VIRTUAL_ADDRESS cb_address =
         backend->constant_buffers[backend->frame_index]->lpVtbl->GetGPUVirtualAddress(
             backend->constant_buffers[backend->frame_index]);
     backend->command_list->lpVtbl->SetGraphicsRootConstantBufferView(backend->command_list, 0,
                                                                      cb_address);
+
+    /* Bind material constant buffer (root CBV at slot 1) */
+    D3D12_GPU_VIRTUAL_ADDRESS mat_address =
+        backend->material_buffers[backend->frame_index]->lpVtbl->GetGPUVirtualAddress(
+            backend->material_buffers[backend->frame_index]);
+    backend->command_list->lpVtbl->SetGraphicsRootConstantBufferView(backend->command_list, 1,
+                                                                     mat_address);
 
     /* Set vertex buffer */
     backend->command_list->lpVtbl->IASetVertexBuffers(backend->command_list, 0, 1,
@@ -572,12 +633,19 @@ void d3d12_draw_mesh(D3D12Backend* backend)
     backend->command_list->lpVtbl->SetGraphicsRootSignature(backend->command_list,
                                                             backend->root_signature);
 
-    /* Bind constant buffer */
+    /* Bind transform constant buffer (root CBV at slot 0) */
     D3D12_GPU_VIRTUAL_ADDRESS cb_address =
         backend->constant_buffers[backend->frame_index]->lpVtbl->GetGPUVirtualAddress(
             backend->constant_buffers[backend->frame_index]);
     backend->command_list->lpVtbl->SetGraphicsRootConstantBufferView(backend->command_list, 0,
                                                                      cb_address);
+
+    /* Bind material constant buffer (root CBV at slot 1) */
+    D3D12_GPU_VIRTUAL_ADDRESS mat_address =
+        backend->material_buffers[backend->frame_index]->lpVtbl->GetGPUVirtualAddress(
+            backend->material_buffers[backend->frame_index]);
+    backend->command_list->lpVtbl->SetGraphicsRootConstantBufferView(backend->command_list, 1,
+                                                                     mat_address);
 
     /* Set vertex buffer */
     backend->command_list->lpVtbl->IASetVertexBuffers(backend->command_list, 0, 1,

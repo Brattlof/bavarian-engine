@@ -10,6 +10,7 @@
 
 #include <bavarian3d/arena.h>
 #include <bavarian3d/camera.h>
+#include <bavarian3d/material.h>
 #include <bavarian3d/math.h>
 #include <bavarian3d/memory.h>
 #include <bavarian3d/mesh.h>
@@ -220,6 +221,56 @@ int main(int argc, char** argv)
             Mat4 mvp = mat4_mul(view_proj, model);
 
             renderer_set_transform(renderer, (const float*)&mvp);
+
+            /* Animate material color (cycle through hue) */
+            f32 hue = fmodf(time * 0.2f, 1.0f);
+            f32 sat = 0.7f;
+            f32 val = 1.0f;
+            /* HSV to RGB conversion */
+            f32 h6 = hue * 6.0f;
+            f32 c = val * sat;
+            f32 x = c * (1.0f - fabsf(fmodf(h6, 2.0f) - 1.0f));
+            f32 m = val - c;
+            f32 mr, mg, mb;
+            if (h6 < 1.0f)
+            {
+                mr = c;
+                mg = x;
+                mb = 0.0f;
+            }
+            else if (h6 < 2.0f)
+            {
+                mr = x;
+                mg = c;
+                mb = 0.0f;
+            }
+            else if (h6 < 3.0f)
+            {
+                mr = 0.0f;
+                mg = c;
+                mb = x;
+            }
+            else if (h6 < 4.0f)
+            {
+                mr = 0.0f;
+                mg = x;
+                mb = c;
+            }
+            else if (h6 < 5.0f)
+            {
+                mr = x;
+                mg = 0.0f;
+                mb = c;
+            }
+            else
+            {
+                mr = c;
+                mg = 0.0f;
+                mb = x;
+            }
+            Material mat = material_from_color(mr + m, mg + m, mb + m, 1.0f);
+            renderer_set_material(renderer, (const float*)&mat);
+
             if (cube)
             {
                 renderer_draw_mesh(renderer);

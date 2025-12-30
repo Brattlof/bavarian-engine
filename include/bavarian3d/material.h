@@ -33,11 +33,11 @@ extern "C"
      */
     typedef struct BAV3D_ALIGN16 Material
     {
-        Vec4 base_color;   /* RGBA base color / tint */
-        f32 metallic;      /* 0 = dielectric, 1 = metal */
-        f32 roughness;     /* 0 = smooth, 1 = rough */
-        f32 emission;      /* Emission intensity */
-        f32 _pad;          /* Padding to 16-byte alignment */
+        Vec4 base_color; /* RGBA base color / tint */
+        f32 metallic;    /* 0 = dielectric, 1 = metal */
+        f32 roughness;   /* 0 = smooth, 1 = rough */
+        f32 emission;    /* Emission intensity */
+        f32 _pad;        /* Padding to 16-byte alignment */
     } Material;
 
     /* =============================================================================

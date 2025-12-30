@@ -522,14 +522,18 @@ Mat4 mat4_from_quat(Quat q)
 
 Mat4 mat4_perspective(f32 fov_y, f32 aspect, f32 near, f32 far)
 {
+    /*
+     * D3D-style perspective matrix - maps Z to [0, 1] range.
+     * OpenGL uses [-1, 1] which causes depth buffer issues on D3D12.
+     */
     f32 tan_half_fov = math_tan(fov_y * 0.5f);
 
     Mat4 m = mat4_zero();
     m.cols[0].x = 1.0f / (aspect * tan_half_fov);
     m.cols[1].y = 1.0f / tan_half_fov;
-    m.cols[2].z = -(far + near) / (far - near);
+    m.cols[2].z = far / (near - far);
     m.cols[2].w = -1.0f;
-    m.cols[3].z = -(2.0f * far * near) / (far - near);
+    m.cols[3].z = (near * far) / (near - far);
     return m;
 }
 

@@ -56,6 +56,7 @@ typedef struct D3D12Backend
     ID3D12Fence* fence;
     HANDLE fence_event;
     u64 fence_values[D3D12_FRAME_COUNT];
+    u64 current_fence_value; /* Global monotonically increasing fence counter */
 
     /* Pipeline state */
     ID3D12RootSignature* root_signature;

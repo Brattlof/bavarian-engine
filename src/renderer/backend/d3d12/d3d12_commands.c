@@ -134,24 +134,11 @@ void d3d12_backend_end_frame(D3D12Backend* backend)
     ID3D12CommandList* cmd_lists[] = {(ID3D12CommandList*)backend->command_list};
     backend->command_queue->lpVtbl->ExecuteCommandLists(backend->command_queue, 1, cmd_lists);
 
-    /*
-     * Signal and wait for GPU to finish before Present.
-     * This is more conservative than typical async patterns but works reliably.
-     * TODO: Investigate why async present fails with DEVICE_HUNG on this system.
-     */
-    backend->fence_values[backend->frame_index]++;
-    hr = backend->command_queue->lpVtbl->Signal(backend->command_queue, backend->fence,
-                                                backend->fence_values[backend->frame_index]);
-    if (SUCCEEDED(hr))
-    {
-        if (backend->fence->lpVtbl->GetCompletedValue(backend->fence) <
-            backend->fence_values[backend->frame_index])
-        {
-            backend->fence->lpVtbl->SetEventOnCompletion(
-                backend->fence, backend->fence_values[backend->frame_index], backend->fence_event);
-            WaitForSingleObject(backend->fence_event, INFINITE);
-        }
-    }
+    /* Signal fence for this frame - we'll wait on it next time this frame index is used */
+    backend->current_fence_value++;
+    backend->fence_values[backend->frame_index] = backend->current_fence_value;
+    backend->command_queue->lpVtbl->Signal(backend->command_queue, backend->fence,
+                                           backend->current_fence_value);
 
     /* Present */
     UINT sync_interval = backend->vsync ? 1 : 0;

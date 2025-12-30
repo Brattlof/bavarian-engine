@@ -346,13 +346,14 @@ void d3d12_backend_wait_idle(D3D12Backend* backend)
     if (!backend || !backend->fence || !backend->command_queue)
         return;
 
-    /* Signal and wait for fence */
-    u64 fence_value = backend->fence_values[backend->frame_index];
-    backend->command_queue->lpVtbl->Signal(backend->command_queue, backend->fence, fence_value);
+    /* Signal and wait for the current fence value to ensure all GPU work is complete */
+    backend->current_fence_value++;
+    backend->command_queue->lpVtbl->Signal(backend->command_queue, backend->fence,
+                                           backend->current_fence_value);
 
-    if (backend->fence->lpVtbl->GetCompletedValue(backend->fence) < fence_value)
+    if (backend->fence->lpVtbl->GetCompletedValue(backend->fence) < backend->current_fence_value)
     {
-        backend->fence->lpVtbl->SetEventOnCompletion(backend->fence, fence_value,
+        backend->fence->lpVtbl->SetEventOnCompletion(backend->fence, backend->current_fence_value,
                                                      backend->fence_event);
         WaitForSingleObject(backend->fence_event, INFINITE);
     }

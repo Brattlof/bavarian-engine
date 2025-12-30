@@ -42,10 +42,10 @@ extern "C"
      */
     typedef struct RenderObject
     {
-        Mesh* mesh;       /* Mesh to render (NULL = inactive) */
+        Mesh* mesh;        /* Mesh to render (NULL = inactive) */
         Material material; /* Material properties */
-        Mat4 transform;   /* World transform (model matrix) */
-        b8 visible;       /* Whether to render this object */
+        Mat4 transform;    /* World transform (model matrix) */
+        b8 visible;        /* Whether to render this object */
     } RenderObject;
 
     /**

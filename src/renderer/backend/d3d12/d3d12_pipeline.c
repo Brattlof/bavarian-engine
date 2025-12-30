@@ -50,7 +50,8 @@ b8 d3d12_create_triangle_pipeline(D3D12Backend* backend)
     root_params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     root_params[1].Constants.ShaderRegister = 1; /* b1 */
     root_params[1].Constants.RegisterSpace = 0;
-    root_params[1].Constants.Num32BitValues = 8; /* base_color + metallic + roughness + emission + pad */
+    root_params[1].Constants.Num32BitValues =
+        8; /* base_color + metallic + roughness + emission + pad */
     root_params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_ROOT_SIGNATURE_DESC root_sig_desc = {0};
@@ -113,10 +114,10 @@ b8 d3d12_create_triangle_pipeline(D3D12Backend* backend)
 
     pso_desc.SampleMask = UINT_MAX;
 
-    /* Rasterizer state */
+    /* Rasterizer state - cull back faces, CCW winding for front faces */
     pso_desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-    pso_desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-    pso_desc.RasterizerState.FrontCounterClockwise = FALSE;
+    pso_desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+    pso_desc.RasterizerState.FrontCounterClockwise = TRUE;
     pso_desc.RasterizerState.DepthBias = 0;
     pso_desc.RasterizerState.DepthBiasClamp = 0.0f;
     pso_desc.RasterizerState.SlopeScaledDepthBias = 0.0f;
@@ -126,7 +127,7 @@ b8 d3d12_create_triangle_pipeline(D3D12Backend* backend)
     pso_desc.RasterizerState.ForcedSampleCount = 0;
     pso_desc.RasterizerState.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
-    /* Depth stencil state - enabled with depth test */
+    /* Depth stencil state */
     pso_desc.DepthStencilState.DepthEnable = TRUE;
     pso_desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
     pso_desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
@@ -327,7 +328,7 @@ b8 d3d12_create_constant_buffers(D3D12Backend* backend)
         }
 
         hr = backend->material_buffers[i]->lpVtbl->Map(backend->material_buffers[i], 0, &read_range,
-                                                        &backend->material_buffer_mapped[i]);
+                                                       &backend->material_buffer_mapped[i]);
         if (FAILED(hr))
         {
             fprintf(stderr, "D3D12: Failed to map material buffer %u (hr=0x%08lX)\n", i, hr);
@@ -485,12 +486,12 @@ void d3d12_draw_triangle(D3D12Backend* backend)
                                                             backend->root_signature);
 
     /* Set transform via root constants (slot 0, 16 floats) */
-    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(
-        backend->command_list, 0, 16, backend->current_transform, 0);
+    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(backend->command_list, 0, 16,
+                                                                 backend->current_transform, 0);
 
     /* Set material via root constants (slot 1, 8 floats) */
-    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(
-        backend->command_list, 1, 8, backend->current_material, 0);
+    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(backend->command_list, 1, 8,
+                                                                 backend->current_material, 0);
 
     /* Set vertex buffer */
     backend->command_list->lpVtbl->IASetVertexBuffers(backend->command_list, 0, 1,
@@ -619,6 +620,12 @@ b8 d3d12_upload_mesh(D3D12Backend* backend, const void* vertices, u32 vertex_cou
 
 void d3d12_destroy_mesh(D3D12Backend* backend)
 {
+    /* Wait for GPU to finish using the mesh before destroying */
+    if (backend->mesh_vertex_buffer || backend->mesh_index_buffer)
+    {
+        d3d12_backend_wait_idle(backend);
+    }
+
     if (backend->mesh_index_buffer)
     {
         backend->mesh_index_buffer->lpVtbl->Release(backend->mesh_index_buffer);
@@ -644,12 +651,12 @@ void d3d12_draw_mesh(D3D12Backend* backend)
                                                             backend->root_signature);
 
     /* Set transform via root constants (slot 0, 16 floats) */
-    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(
-        backend->command_list, 0, 16, backend->current_transform, 0);
+    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(backend->command_list, 0, 16,
+                                                                 backend->current_transform, 0);
 
     /* Set material via root constants (slot 1, 8 floats) */
-    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(
-        backend->command_list, 1, 8, backend->current_material, 0);
+    backend->command_list->lpVtbl->SetGraphicsRoot32BitConstants(backend->command_list, 1, 8,
+                                                                 backend->current_material, 0);
 
     /* Set vertex buffer */
     backend->command_list->lpVtbl->IASetVertexBuffers(backend->command_list, 0, 1,

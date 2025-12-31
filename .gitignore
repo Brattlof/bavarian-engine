@@ -39,3 +39,10 @@ Thumbs.db
 # Test artifacts
 Testing/
 *.log
+
+# ImGui
+imgui.ini
+
+# Local dev files
+*.md
+!README.md

@@ -303,8 +303,8 @@ BavEditor* bav_editor_create(const BavEditorConfig* config)
     if (!config || !config->window_handle)
         return nullptr;
 
-    BavEditor* editor = new BavEditor();
-    memset(editor, 0, sizeof(BavEditor));
+    /* Use brace init - zero-initializes POD members, properly constructs std::vectors */
+    BavEditor* editor = new BavEditor{};
 
     editor->window_handle = config->window_handle;
     editor->window_width = config->window_width;
@@ -568,29 +568,29 @@ static void editor_menu_bar(BavEditor* editor)
             ImGui::EndMenu();
         }
 
-        /* Play/Pause/Stop buttons in menu bar */
+        /* Play/Pause/Stop toolbar buttons in menu bar */
         ImGui::Separator();
 
         if (editor->pie_state == BAV_PIE_STOPPED)
         {
-            if (ImGui::Button("Play"))
+            if (ImGui::Button("Play##Toolbar"))
                 bav_editor_play(editor);
         }
         else
         {
-            if (ImGui::Button("Stop"))
+            if (ImGui::Button("Stop##Toolbar"))
                 bav_editor_stop(editor);
 
             ImGui::SameLine();
 
             if (editor->pie_state == BAV_PIE_PLAYING)
             {
-                if (ImGui::Button("Pause"))
+                if (ImGui::Button("Pause##Toolbar"))
                     bav_editor_pause(editor);
             }
             else
             {
-                if (ImGui::Button("Resume"))
+                if (ImGui::Button("Resume##Toolbar"))
                     bav_editor_play(editor);
             }
         }

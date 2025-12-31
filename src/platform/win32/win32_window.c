@@ -43,6 +43,7 @@ struct Window
 
 static const wchar_t* WINDOW_CLASS_NAME = L"BAV3D_WindowClass";
 static b8 g_class_registered = false;
+static WindowMsgHandler g_external_msg_handler = NULL;
 
 /* =============================================================================
  * Window Procedure
@@ -50,6 +51,14 @@ static b8 g_class_registered = false;
 
 static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
+    /* Call external handler first (for ImGui etc.) */
+    if (g_external_msg_handler)
+    {
+        isize result = g_external_msg_handler(hwnd, msg, wparam, lparam);
+        if (result)
+            return (LRESULT)result;
+    }
+
     Window* window = (Window*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
 
     switch (msg)
@@ -362,6 +371,11 @@ void* win32_window_get_native_handle(const Window* window)
 void* win32_window_get_native_display(void)
 {
     return GetModuleHandleW(NULL);
+}
+
+void win32_window_set_msg_handler(WindowMsgHandler handler)
+{
+    g_external_msg_handler = handler;
 }
 
 #endif /* BAV3D_PLATFORM_WINDOWS */

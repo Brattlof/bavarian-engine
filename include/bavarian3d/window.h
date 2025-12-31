@@ -157,6 +157,24 @@ extern "C"
     b8 window_get_event(Window* window, WindowEvent* event);
 
     /* =============================================================================
+     * Message Handler Callback (for ImGui integration etc.)
+     * ============================================================================= */
+
+    /**
+     * Platform-specific message handler callback.
+     * On Windows, the signature matches LRESULT(HWND, UINT, WPARAM, LPARAM).
+     * Return non-zero to indicate the message was handled.
+     */
+    typedef isize (*WindowMsgHandler)(void* hwnd, u32 msg, usize wparam, isize lparam);
+
+    /**
+     * Set external message handler callback.
+     * This is called before the default handler processes messages.
+     * Used for ImGui integration - pass ImGui_ImplWin32_WndProcHandler.
+     */
+    void window_set_msg_handler(WindowMsgHandler handler);
+
+    /* =============================================================================
      * Native Handle Access
      * ============================================================================= */
 

@@ -27,6 +27,7 @@ void win32_window_wait_events(void);
 b8 win32_window_get_event(Window* window, WindowEvent* event);
 void* win32_window_get_native_handle(const Window* window);
 void* win32_window_get_native_display(void);
+void win32_window_set_msg_handler(WindowMsgHandler handler);
 
     #define PLATFORM_IMPL(fn) win32_##fn
 #elif defined(BAV3D_PLATFORM_MACOS)
@@ -114,4 +115,9 @@ void* window_get_native_handle(const Window* window)
 void* window_get_native_display(void)
 {
     return PLATFORM_IMPL(window_get_native_display)();
+}
+
+void window_set_msg_handler(WindowMsgHandler handler)
+{
+    PLATFORM_IMPL(window_set_msg_handler)(handler);
 }

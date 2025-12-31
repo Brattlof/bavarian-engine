@@ -6,18 +6,18 @@
  * This is the standalone editor application - NOT part of the runtime.
  */
 
-#include <bavarian/editor.h>
 #include <bavarian3d/window.h>
 
+#include <bavarian/editor.h>
 #include <cstdio>
 #include <cstdlib>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+    #define WIN32_LEAN_AND_MEAN
+    #include <Windows.h>
 
 /* Forward declare message handler from imgui_impl_win32.cpp */
-extern "C" LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #endif
 
 int main(int argc, char** argv)
@@ -47,6 +47,11 @@ int main(int argc, char** argv)
 
     /* Get native window handle */
     void* native_handle = window_get_native_handle(window);
+
+#ifdef _WIN32
+    /* Hook up ImGui's message handler so it receives input */
+    window_set_msg_handler((WindowMsgHandler)ImGui_ImplWin32_WndProcHandler);
+#endif
 
     /* Create editor */
     BavEditorConfig editor_config = {};

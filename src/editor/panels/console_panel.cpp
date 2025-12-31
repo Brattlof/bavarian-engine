@@ -6,9 +6,7 @@
  */
 
 #include <bavarian/editor.h>
-
 #include <imgui.h>
-
 #include <vector>
 
 /* Forward declarations - defined in editor.cpp */
@@ -121,8 +119,7 @@ void editor_console_panel_update(BavEditor* editor)
     char* input_buffer = editor_get_console_input(editor);
     if (input_buffer)
     {
-        ImGuiInputTextFlags input_flags =
-            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory;
+        ImGuiInputTextFlags input_flags = ImGuiInputTextFlags_EnterReturnsTrue;
 
         if (ImGui::InputText("##ConsoleInput", input_buffer, 256, input_flags))
         {

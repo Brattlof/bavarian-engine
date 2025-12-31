@@ -19,11 +19,13 @@
 
 #ifdef _WIN32
     #include <d3d12.h>
+    #include <dwmapi.h>
     #include <dxgi1_4.h>
     #include <imgui_impl_dx12.h>
     #include <imgui_impl_win32.h>
 
     #pragma comment(lib, "d3d12.lib")
+    #pragma comment(lib, "dwmapi.lib")
     #pragma comment(lib, "dxgi.lib")
 #endif
 
@@ -92,6 +94,7 @@ struct BavEditor
     ID3D12Fence* fence;
     HANDLE fence_event;
     UINT64 fence_values[NUM_BACK_BUFFERS];
+    UINT64 current_fence_value;
     UINT frame_index;
     UINT rtv_descriptor_size;
 #endif
@@ -170,7 +173,7 @@ static bool editor_init_d3d12(BavEditor* editor, HWND hwnd, u32 width, u32 heigh
         return false;
     }
 
-    /* Create swap chain */
+    /* Create swap chain - matching engine's approach for vsync */
     DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {};
     swap_chain_desc.BufferCount = NUM_BACK_BUFFERS;
     swap_chain_desc.Width = width;
@@ -179,6 +182,9 @@ static bool editor_init_d3d12(BavEditor* editor, HWND hwnd, u32 width, u32 heigh
     swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swap_chain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     swap_chain_desc.SampleDesc.Count = 1;
+    swap_chain_desc.Scaling = DXGI_SCALING_STRETCH;
+    swap_chain_desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+    swap_chain_desc.Flags = 0;
 
     IDXGISwapChain1* swap_chain1 = nullptr;
     if (FAILED(factory->CreateSwapChainForHwnd(editor->command_queue, hwnd, &swap_chain_desc,
@@ -196,6 +202,7 @@ static bool editor_init_d3d12(BavEditor* editor, HWND hwnd, u32 width, u32 heigh
     factory->Release();
 
     editor->frame_index = editor->swap_chain->GetCurrentBackBufferIndex();
+    editor->current_fence_value = 0;
 
     /* Create RTV descriptor heap */
     D3D12_DESCRIPTOR_HEAP_DESC rtv_heap_desc = {};
@@ -325,6 +332,34 @@ BavEditor* bav_editor_create(const BavEditorConfig* config)
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    /* Load custom font - Segoe UI for professional Windows look */
+    float font_size = 15.0f;
+    float icon_font_size = 14.0f;
+
+    /* Try to load Segoe UI (Windows system font) */
+    ImFont* main_font = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", font_size);
+    if (!main_font)
+    {
+        /* Fallback to default font if Segoe UI not available */
+        io.Fonts->AddFontDefault();
+    }
+
+    /* Add bold font for headers */
+    ImFont* bold_font =
+        io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeuib.ttf", font_size + 1.0f);
+    BAV_UNUSED(bold_font);
+
+    /* Add larger font for titles */
+    ImFont* title_font =
+        io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeuib.ttf", font_size + 4.0f);
+    BAV_UNUSED(title_font);
+
+    /* Small font for details */
+    ImFont* small_font =
+        io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", font_size - 2.0f);
+    BAV_UNUSED(small_font);
+    BAV_UNUSED(icon_font_size);
 
     /* Initialize theme */
     editor_init_theme(config->dark_mode);
@@ -720,13 +755,19 @@ b8 bav_editor_update(BavEditor* editor, f32 delta_time)
     ID3D12CommandList* cmd_lists[] = {editor->command_list};
     editor->command_queue->ExecuteCommandLists(1, cmd_lists);
 
-    /* Present */
+    /* Signal fence for this frame */
+    editor->current_fence_value++;
+    editor->fence_values[editor->frame_index] = editor->current_fence_value;
+    editor->command_queue->Signal(editor->fence, editor->current_fence_value);
+
+    /* Present with vsync (sync_interval = 1) */
     editor->swap_chain->Present(1, 0);
 
-    /* Signal fence */
-    editor->fence_values[back_buffer_idx] = editor->fence_values[editor->frame_index] + 1;
-    editor->command_queue->Signal(editor->fence, editor->fence_values[back_buffer_idx]);
-    editor->frame_index = back_buffer_idx;
+    /* Sync with desktop compositor for proper vsync in windowed mode */
+    DwmFlush();
+
+    /* Update frame index */
+    editor->frame_index = editor->swap_chain->GetCurrentBackBufferIndex();
 #endif
 
     return true;

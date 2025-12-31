@@ -60,6 +60,7 @@ int main(int argc, char** argv)
     editor_config.window_width = (u32)window_desc.width;
     editor_config.window_height = (u32)window_desc.height;
     editor_config.dark_mode = true;
+    editor_config.vsync_enabled = false; /* Uncapped FPS for testing */
 
     BavEditor* editor = bav_editor_create(&editor_config);
     if (!editor)

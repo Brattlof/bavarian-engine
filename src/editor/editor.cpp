@@ -20,7 +20,7 @@
 #ifdef _WIN32
     #include <d3d12.h>
     #include <dwmapi.h>
-    #include <dxgi1_4.h>
+    #include <dxgi1_6.h>
     #include <imgui_impl_dx12.h>
     #include <imgui_impl_win32.h>
 
@@ -93,10 +93,13 @@ struct BavEditor
     ID3D12Resource* render_targets[NUM_BACK_BUFFERS];
     ID3D12Fence* fence;
     HANDLE fence_event;
+    HANDLE frame_latency_waitable;
     UINT64 fence_values[NUM_BACK_BUFFERS];
     UINT64 current_fence_value;
     UINT frame_index;
     UINT rtv_descriptor_size;
+    bool tearing_supported;
+    bool vsync_enabled;
 #endif
 
     /* ECS admin for scene editing */
@@ -146,12 +149,34 @@ struct BavEditor
  * ============================================================================= */
 
 #ifdef _WIN32
-static bool editor_init_d3d12(BavEditor* editor, HWND hwnd, u32 width, u32 height)
+static bool check_tearing_support(IDXGIFactory4* factory)
 {
+    IDXGIFactory5* factory5 = nullptr;
+    if (SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory5))))
+    {
+        BOOL allow_tearing = FALSE;
+        HRESULT hr = factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+                                                   &allow_tearing, sizeof(allow_tearing));
+        factory5->Release();
+        if (SUCCEEDED(hr) && allow_tearing)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool editor_init_d3d12(BavEditor* editor, HWND hwnd, u32 width, u32 height, bool vsync)
+{
+    editor->vsync_enabled = vsync;
+
     /* Create DXGI factory */
     IDXGIFactory4* factory = nullptr;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
         return false;
+
+    /* Check tearing support for VRR/uncapped framerates */
+    editor->tearing_supported = check_tearing_support(factory);
 
     /* Create D3D12 device */
     if (FAILED(
@@ -173,7 +198,11 @@ static bool editor_init_d3d12(BavEditor* editor, HWND hwnd, u32 width, u32 heigh
         return false;
     }
 
-    /* Create swap chain - matching engine's approach for vsync */
+    /*
+     * Create swap chain with waitable object for proper frame pacing.
+     * This prevents flickering at high framerates - we wait for buffer availability
+     * rather than blindly racing the GPU.
+     */
     DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {};
     swap_chain_desc.BufferCount = NUM_BACK_BUFFERS;
     swap_chain_desc.Width = width;
@@ -184,7 +213,11 @@ static bool editor_init_d3d12(BavEditor* editor, HWND hwnd, u32 width, u32 heigh
     swap_chain_desc.SampleDesc.Count = 1;
     swap_chain_desc.Scaling = DXGI_SCALING_STRETCH;
     swap_chain_desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
-    swap_chain_desc.Flags = 0;
+    swap_chain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    if (editor->tearing_supported)
+    {
+        swap_chain_desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    }
 
     IDXGISwapChain1* swap_chain1 = nullptr;
     if (FAILED(factory->CreateSwapChainForHwnd(editor->command_queue, hwnd, &swap_chain_desc,
@@ -200,6 +233,19 @@ static bool editor_init_d3d12(BavEditor* editor, HWND hwnd, u32 width, u32 heigh
     swap_chain1->QueryInterface(IID_PPV_ARGS(&editor->swap_chain));
     swap_chain1->Release();
     factory->Release();
+
+    /* Set up frame latency waitable for flicker-free unlimited FPS */
+    IDXGISwapChain2* swap_chain2 = nullptr;
+    if (SUCCEEDED(editor->swap_chain->QueryInterface(IID_PPV_ARGS(&swap_chain2))))
+    {
+        swap_chain2->SetMaximumFrameLatency(1);
+        editor->frame_latency_waitable = swap_chain2->GetFrameLatencyWaitableObject();
+        swap_chain2->Release();
+    }
+    else
+    {
+        editor->frame_latency_waitable = nullptr;
+    }
 
     editor->frame_index = editor->swap_chain->GetCurrentBackBufferIndex();
     editor->current_fence_value = 0;
@@ -281,6 +327,8 @@ static void editor_cleanup_d3d12(BavEditor* editor)
 {
     editor_wait_for_gpu(editor);
 
+    if (editor->frame_latency_waitable)
+        CloseHandle(editor->frame_latency_waitable);
     if (editor->fence_event)
         CloseHandle(editor->fence_event);
     if (editor->fence)
@@ -367,7 +415,7 @@ BavEditor* bav_editor_create(const BavEditorConfig* config)
     /* Initialize D3D12 */
 #ifdef _WIN32
     if (!editor_init_d3d12(editor, (HWND)config->window_handle, config->window_width,
-                           config->window_height))
+                           config->window_height, config->vsync_enabled))
     {
         delete editor;
         return nullptr;
@@ -707,6 +755,16 @@ b8 bav_editor_update(BavEditor* editor, f32 delta_time)
     }
 
 #ifdef _WIN32
+    /*
+     * Wait for a back buffer to become available. This prevents flickering at
+     * high framerates - we only proceed when the swap chain has a buffer ready.
+     * At 4000+ FPS this rarely blocks; when GPU-bound it throttles naturally.
+     */
+    if (editor->frame_latency_waitable)
+    {
+        WaitForSingleObject(editor->frame_latency_waitable, INFINITE);
+    }
+
     /* D3D12 rendering */
     UINT back_buffer_idx = editor->swap_chain->GetCurrentBackBufferIndex();
 
@@ -760,11 +818,24 @@ b8 bav_editor_update(BavEditor* editor, f32 delta_time)
     editor->fence_values[editor->frame_index] = editor->current_fence_value;
     editor->command_queue->Signal(editor->fence, editor->current_fence_value);
 
-    /* Present with vsync (sync_interval = 1) */
-    editor->swap_chain->Present(1, 0);
+    /*
+     * Present the frame.
+     * - With vsync: sync_interval=1 waits for vblank
+     * - Without vsync: sync_interval=0 + ALLOW_TEARING for uncapped FPS
+     */
+    UINT sync_interval = editor->vsync_enabled ? 1 : 0;
+    UINT present_flags = 0;
+    if (!editor->vsync_enabled && editor->tearing_supported)
+    {
+        present_flags = DXGI_PRESENT_ALLOW_TEARING;
+    }
+    editor->swap_chain->Present(sync_interval, present_flags);
 
-    /* Sync with desktop compositor for proper vsync in windowed mode */
-    DwmFlush();
+    /* Sync with compositor only when using vsync in windowed mode */
+    if (editor->vsync_enabled)
+    {
+        DwmFlush();
+    }
 
     /* Update frame index */
     editor->frame_index = editor->swap_chain->GetCurrentBackBufferIndex();

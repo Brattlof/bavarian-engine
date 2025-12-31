@@ -47,7 +47,8 @@ extern "C"
         void* window_handle;      /* Platform window handle */
         u32 window_width;
         u32 window_height;
-        b8 dark_mode; /* Use dark theme */
+        b8 dark_mode;     /* Use dark theme */
+        b8 vsync_enabled; /* Enable vsync (false for uncapped FPS) */
     } BavEditorConfig;
 
     /* =============================================================================

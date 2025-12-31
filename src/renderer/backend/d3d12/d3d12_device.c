@@ -126,8 +126,30 @@ static b8 create_command_queue(D3D12Backend* backend)
     return true;
 }
 
+static b8 check_tearing_support(D3D12Backend* backend)
+{
+    IDXGIFactory5* factory5 = NULL;
+    HRESULT hr = backend->factory->lpVtbl->QueryInterface(backend->factory, &IID_IDXGIFactory5,
+                                                          (void**)&factory5);
+    if (SUCCEEDED(hr))
+    {
+        BOOL allow_tearing = FALSE;
+        hr = factory5->lpVtbl->CheckFeatureSupport(factory5, DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+                                                   &allow_tearing, sizeof(allow_tearing));
+        factory5->lpVtbl->Release(factory5);
+        if (SUCCEEDED(hr) && allow_tearing)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 static b8 create_swapchain(D3D12Backend* backend)
 {
+    /* Check if we can use tearing (variable refresh rate / unlocked fps) */
+    backend->tearing_supported = check_tearing_support(backend);
+
     DXGI_SWAP_CHAIN_DESC1 swapchain_desc = {0};
     swapchain_desc.Width = backend->width;
     swapchain_desc.Height = backend->height;
@@ -140,7 +162,20 @@ static b8 create_swapchain(D3D12Backend* backend)
     swapchain_desc.Scaling = DXGI_SCALING_STRETCH;
     swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     swapchain_desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
-    swapchain_desc.Flags = 0;
+
+    /*
+     * FRAME_LATENCY_WAITABLE_OBJECT: Lets us wait for buffer availability instead of
+     * blindly racing the GPU. This prevents flickering at high framerates without
+     * capping FPS - we only block when we're actually out of buffers.
+     *
+     * ALLOW_TEARING: Enables true variable refresh rate on supported displays.
+     * When vsync is off, frames present immediately without waiting for vblank.
+     */
+    swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    if (backend->tearing_supported)
+    {
+        swapchain_desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    }
 
     IDXGISwapChain1* swapchain1 = NULL;
     HRESULT hr = backend->factory->lpVtbl->CreateSwapChainForHwnd(
@@ -157,6 +192,28 @@ static b8 create_swapchain(D3D12Backend* backend)
                                             (void**)&backend->swapchain);
     swapchain1->lpVtbl->Release(swapchain1);
     HR_CHECK(hr, "Failed to get IDXGISwapChain3");
+
+    /*
+     * Set up frame latency waitable - this is the magic that lets us run at
+     * unlimited FPS without flickering. We wait on this handle before each frame,
+     * which blocks only when we've exhausted all available back buffers.
+     * Max latency of 1 keeps input lag tight while still allowing full speed.
+     */
+    IDXGISwapChain2* swapchain2 = NULL;
+    hr = backend->swapchain->lpVtbl->QueryInterface(backend->swapchain, &IID_IDXGISwapChain2,
+                                                    (void**)&swapchain2);
+    if (SUCCEEDED(hr))
+    {
+        swapchain2->lpVtbl->SetMaximumFrameLatency(swapchain2, 1);
+        backend->frame_latency_waitable =
+            swapchain2->lpVtbl->GetFrameLatencyWaitableObject(swapchain2);
+        swapchain2->lpVtbl->Release(swapchain2);
+    }
+    else
+    {
+        fprintf(stderr, "D3D12: Warning - couldn't get IDXGISwapChain2 for waitable object\n");
+        backend->frame_latency_waitable = NULL;
+    }
 
     backend->frame_index =
         backend->swapchain->lpVtbl->GetCurrentBackBufferIndex(backend->swapchain);
@@ -315,6 +372,12 @@ void d3d12_backend_shutdown(D3D12Backend* backend)
     d3d12_destroy_constant_buffers(backend);
     d3d12_destroy_triangle_buffers(backend);
     d3d12_destroy_triangle_pipeline(backend);
+
+    if (backend->frame_latency_waitable)
+    {
+        CloseHandle(backend->frame_latency_waitable);
+        backend->frame_latency_waitable = NULL;
+    }
 
     if (backend->fence_event)
     {

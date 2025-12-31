@@ -55,6 +55,7 @@ typedef struct D3D12Backend
     /* Synchronization */
     ID3D12Fence* fence;
     HANDLE fence_event;
+    HANDLE frame_latency_waitable; /* Waitable object for frame pacing */
     u64 fence_values[D3D12_FRAME_COUNT];
     u64 current_fence_value; /* Global monotonically increasing fence counter */
 
@@ -94,6 +95,7 @@ typedef struct D3D12Backend
     u32 height;
     HWND hwnd;
     b8 vsync;
+    b8 tearing_supported; /* Can we use DXGI_PRESENT_ALLOW_TEARING? */
     b8 initialized;
 
     /* Current per-draw constants (used with root constants) */

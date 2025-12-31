@@ -74,6 +74,19 @@ b8 d3d12_backend_begin_frame(D3D12Backend* backend)
     if (!backend || !backend->initialized)
         return false;
 
+    /*
+     * Wait for a back buffer to become available. This is what prevents flickering
+     * at high framerates - we only proceed when the swap chain actually has a buffer
+     * ready for us. Unlike vsync waiting (which blocks until vblank), this only
+     * blocks when we're GPU-bound and have exhausted all available buffers.
+     * At 4000+ fps this will rarely block; at GPU-limited scenarios it throttles
+     * naturally without tearing or flickering.
+     */
+    if (backend->frame_latency_waitable)
+    {
+        WaitForSingleObject(backend->frame_latency_waitable, INFINITE);
+    }
+
     /* Wait for this frame's previous work to complete */
     wait_for_previous_frame(backend);
 
@@ -140,9 +153,22 @@ void d3d12_backend_end_frame(D3D12Backend* backend)
     backend->command_queue->lpVtbl->Signal(backend->command_queue, backend->fence,
                                            backend->current_fence_value);
 
-    /* Present */
+    /*
+     * Present the frame.
+     * - With vsync: sync_interval=1 waits for vblank, no tearing
+     * - Without vsync: sync_interval=0 + ALLOW_TEARING presents immediately
+     *
+     * ALLOW_TEARING is required for true variable refresh rate (VRR/FreeSync/G-Sync)
+     * and for running at uncapped framerates without the compositor getting in the way.
+     * Must only be used when sync_interval=0, otherwise it's an error.
+     */
     UINT sync_interval = backend->vsync ? 1 : 0;
-    hr = backend->swapchain->lpVtbl->Present(backend->swapchain, sync_interval, 0);
+    UINT present_flags = 0;
+    if (!backend->vsync && backend->tearing_supported)
+    {
+        present_flags = DXGI_PRESENT_ALLOW_TEARING;
+    }
+    hr = backend->swapchain->lpVtbl->Present(backend->swapchain, sync_interval, present_flags);
     if (FAILED(hr))
     {
         HRESULT reason = backend->device->lpVtbl->GetDeviceRemovedReason(backend->device);
@@ -171,9 +197,15 @@ void d3d12_backend_resize(D3D12Backend* backend, u32 width, u32 height)
     /* Release render target references */
     release_render_targets(backend);
 
-    /* Resize swapchain */
+    /* Resize swapchain - preserve the flags we set at creation */
+    UINT swapchain_flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    if (backend->tearing_supported)
+    {
+        swapchain_flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    }
     HRESULT hr = backend->swapchain->lpVtbl->ResizeBuffers(
-        backend->swapchain, D3D12_FRAME_COUNT, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+        backend->swapchain, D3D12_FRAME_COUNT, width, height, DXGI_FORMAT_R8G8B8A8_UNORM,
+        swapchain_flags);
     if (FAILED(hr))
     {
         fprintf(stderr, "D3D12: Failed to resize swapchain\n");

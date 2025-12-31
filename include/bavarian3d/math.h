@@ -17,6 +17,47 @@
 
 #include <bavarian3d/types.h>
 
+/* C/C++ compatibility for compound literals */
+#ifdef __cplusplus
+    #define VEC2_INIT(x, y)                                                                        \
+        Vec2                                                                                       \
+        {                                                                                          \
+            x, y, {0, 0}                                                                           \
+        }
+    #define VEC3_INIT(x, y, z) Vec3{x, y, z, 0}
+    #define VEC4_INIT(x, y, z, w)                                                                  \
+        Vec4                                                                                       \
+        {                                                                                          \
+            x, y, z, w                                                                             \
+        }
+    #define QUAT_INIT(x, y, z, w)                                                                  \
+        Quat                                                                                       \
+        {                                                                                          \
+            x, y, z, w                                                                             \
+        }
+    #define MAT4_ALIGNOF alignof(Mat4)
+    #define VEC4_ALIGNOF alignof(Vec4)
+#else
+    #define VEC2_INIT(x, y)                                                                        \
+        (Vec2)                                                                                     \
+        {                                                                                          \
+            x, y, {0, 0}                                                                           \
+        }
+    #define VEC3_INIT(x, y, z) (Vec3){x, y, z, 0}
+    #define VEC4_INIT(x, y, z, w)                                                                  \
+        (Vec4)                                                                                     \
+        {                                                                                          \
+            x, y, z, w                                                                             \
+        }
+    #define QUAT_INIT(x, y, z, w)                                                                  \
+        (Quat)                                                                                     \
+        {                                                                                          \
+            x, y, z, w                                                                             \
+        }
+    #define MAT4_ALIGNOF _Alignof(Mat4)
+    #define VEC4_ALIGNOF _Alignof(Vec4)
+#endif
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -189,15 +230,15 @@ extern "C"
 
     static inline Vec2 vec2(f32 x, f32 y)
     {
-        return (Vec2){x, y, {0, 0}};
+        return VEC2_INIT(x, y);
     }
     static inline Vec2 vec2_zero(void)
     {
-        return (Vec2){0, 0, {0, 0}};
+        return VEC2_INIT(0, 0);
     }
     static inline Vec2 vec2_one(void)
     {
-        return (Vec2){1, 1, {0, 0}};
+        return VEC2_INIT(1, 1);
     }
 
     Vec2 vec2_add(Vec2 a, Vec2 b);
@@ -216,27 +257,27 @@ extern "C"
 
     static inline Vec3 vec3(f32 x, f32 y, f32 z)
     {
-        return (Vec3){x, y, z, 0};
+        return VEC3_INIT(x, y, z);
     }
     static inline Vec3 vec3_zero(void)
     {
-        return (Vec3){0, 0, 0, 0};
+        return VEC3_INIT(0, 0, 0);
     }
     static inline Vec3 vec3_one(void)
     {
-        return (Vec3){1, 1, 1, 0};
+        return VEC3_INIT(1, 1, 1);
     }
     static inline Vec3 vec3_up(void)
     {
-        return (Vec3){0, 1, 0, 0};
+        return VEC3_INIT(0, 1, 0);
     }
     static inline Vec3 vec3_right(void)
     {
-        return (Vec3){1, 0, 0, 0};
+        return VEC3_INIT(1, 0, 0);
     }
     static inline Vec3 vec3_forward(void)
     {
-        return (Vec3){0, 0, -1, 0};
+        return VEC3_INIT(0, 0, -1);
     }
 
     Vec3 vec3_add(Vec3 a, Vec3 b);
@@ -259,19 +300,19 @@ extern "C"
 
     static inline Vec4 vec4(f32 x, f32 y, f32 z, f32 w)
     {
-        return (Vec4){x, y, z, w};
+        return VEC4_INIT(x, y, z, w);
     }
     static inline Vec4 vec4_zero(void)
     {
-        return (Vec4){0, 0, 0, 0};
+        return VEC4_INIT(0, 0, 0, 0);
     }
     static inline Vec4 vec4_one(void)
     {
-        return (Vec4){1, 1, 1, 1};
+        return VEC4_INIT(1, 1, 1, 1);
     }
     static inline Vec4 vec4_from_vec3(Vec3 v, f32 w)
     {
-        return (Vec4){v.x, v.y, v.z, w};
+        return VEC4_INIT(v.x, v.y, v.z, w);
     }
 
     Vec4 vec4_add(Vec4 a, Vec4 b);
@@ -334,11 +375,11 @@ extern "C"
 
     static inline Quat quat(f32 x, f32 y, f32 z, f32 w)
     {
-        return (Quat){x, y, z, w};
+        return QUAT_INIT(x, y, z, w);
     }
     static inline Quat quat_identity(void)
     {
-        return (Quat){0, 0, 0, 1};
+        return QUAT_INIT(0, 0, 0, 1);
     }
 
     Quat quat_from_axis_angle(Vec3 axis, f32 radians);
@@ -376,13 +417,13 @@ extern "C"
      * Static Assertions
      * ============================================================================= */
 
-    _Static_assert(sizeof(Vec2) == 16, "Vec2 must be 16 bytes");
-    _Static_assert(sizeof(Vec3) == 16, "Vec3 must be 16 bytes");
-    _Static_assert(sizeof(Vec4) == 16, "Vec4 must be 16 bytes");
-    _Static_assert(sizeof(Mat4) == 64, "Mat4 must be 64 bytes");
-    _Static_assert(sizeof(Quat) == 16, "Quat must be 16 bytes");
-    _Static_assert(_Alignof(Vec4) == 16, "Vec4 must be 16-byte aligned");
-    _Static_assert(_Alignof(Mat4) == 16, "Mat4 must be 16-byte aligned");
+    BAV3D_STATIC_ASSERT(sizeof(Vec2) == 16, "Vec2 must be 16 bytes");
+    BAV3D_STATIC_ASSERT(sizeof(Vec3) == 16, "Vec3 must be 16 bytes");
+    BAV3D_STATIC_ASSERT(sizeof(Vec4) == 16, "Vec4 must be 16 bytes");
+    BAV3D_STATIC_ASSERT(sizeof(Mat4) == 64, "Mat4 must be 64 bytes");
+    BAV3D_STATIC_ASSERT(sizeof(Quat) == 16, "Quat must be 16 bytes");
+    BAV3D_STATIC_ASSERT(VEC4_ALIGNOF == 16, "Vec4 must be 16-byte aligned");
+    BAV3D_STATIC_ASSERT(MAT4_ALIGNOF == 16, "Mat4 must be 16-byte aligned");
 
 #ifdef __cplusplus
 }

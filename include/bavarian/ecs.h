@@ -207,6 +207,16 @@ extern "C"
      */
     u32 bav_entity_count(BavEntityAdmin* admin);
 
+    /**
+     * Get all live entities.
+     *
+     * @param admin     Entity admin
+     * @param out_entities Buffer to fill with entity handles
+     * @param max_count Maximum number of entities to retrieve
+     * @return Number of entities written to buffer
+     */
+    u32 bav_entity_get_all(BavEntityAdmin* admin, BavEntity* out_entities, u32 max_count);
+
     /* =============================================================================
      * Component Operations
      * ============================================================================= */
@@ -374,8 +384,8 @@ extern "C"
      * Optimized query iteration with prefetching.
      * Drop-in replacement for bav_query_each with better cache behavior.
      */
-    void bav_query_each_fast(BavEntityAdmin* admin, const BavQuery* query, BavQueryCallback callback,
-                             void* user_data);
+    void bav_query_each_fast(BavEntityAdmin* admin, const BavQuery* query,
+                             BavQueryCallback callback, void* user_data);
 
     /**
      * Optimized batch iteration with prefetching.

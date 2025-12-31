@@ -6,10 +6,11 @@
  * management flows through here.
  */
 
-#include "ecs_internal.h"
 #include <bavarian/types.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "ecs_internal.h"
 
 /* Internal structures are defined in ecs_internal.h */
 
@@ -518,6 +519,26 @@ b8 bav_entity_valid(BavEntityAdmin* admin, BavEntity entity)
 u32 bav_entity_count(BavEntityAdmin* admin)
 {
     return admin ? admin->entity_count : 0;
+}
+
+u32 bav_entity_get_all(BavEntityAdmin* admin, BavEntity* out_entities, u32 max_count)
+{
+    if (!admin || !out_entities || max_count == 0)
+        return 0;
+
+    u32 count = 0;
+    for (u32 i = 0; i < admin->entity_capacity && count < max_count; i++)
+    {
+        EntityRecord* rec = &admin->entities[i];
+        if (rec->alive)
+        {
+            out_entities[count].index = i;
+            out_entities[count].generation = rec->generation;
+            out_entities[count].flags = 0;
+            count++;
+        }
+    }
+    return count;
 }
 
 /* =============================================================================

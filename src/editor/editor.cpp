@@ -9,6 +9,8 @@
  * It never ships with games.
  */
 
+#include <bavarian3d/ecs_render.h>
+
 #include <bavarian/ecs.h>
 #include <bavarian/editor.h>
 #include <bavarian/types.h>
@@ -96,6 +98,10 @@ struct BavEditor
 
     /* ECS admin for scene editing */
     BavEntityAdmin* ecs_admin;
+
+    /* Component IDs */
+    BavComponentId transform_component_id;
+    BavComponentId mesh_renderer_component_id;
 
     /* Selection state */
     std::vector<BavEntity> selected_entities;
@@ -380,6 +386,10 @@ BavEditor* bav_editor_create(const BavEditorConfig* config)
     ecs_config.initial_archetype_capacity = 64;
     editor->ecs_admin = bav_entity_admin_create(&ecs_config);
 
+    /* Register standard components */
+    ecs_render_register_components(editor->ecs_admin, &editor->transform_component_id,
+                                   &editor->mesh_renderer_component_id);
+
     return editor;
 }
 
@@ -654,6 +664,12 @@ b8 bav_editor_update(BavEditor* editor, f32 delta_time)
 
     /* Render ImGui */
     ImGui::Render();
+
+    /* Flush ECS deferred commands (entity create/destroy, component add/remove) */
+    if (editor->ecs_admin)
+    {
+        bav_entity_admin_flush(editor->ecs_admin);
+    }
 
 #ifdef _WIN32
     /* D3D12 rendering */
@@ -1145,6 +1161,16 @@ void bav_editor_end_window(BavEditor* editor)
 BavEntityAdmin* editor_get_ecs_admin(BavEditor* editor)
 {
     return editor ? editor->ecs_admin : nullptr;
+}
+
+BavComponentId editor_get_transform_component_id(BavEditor* editor)
+{
+    return editor ? editor->transform_component_id : BAV_COMPONENT_INVALID;
+}
+
+BavComponentId editor_get_mesh_renderer_component_id(BavEditor* editor)
+{
+    return editor ? editor->mesh_renderer_component_id : BAV_COMPONENT_INVALID;
 }
 
 std::vector<ConsoleMessage>& editor_get_console_messages(BavEditor* editor)

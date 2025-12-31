@@ -6,32 +6,54 @@
  * Shows all components attached to the entity.
  */
 
-#include <bavarian/editor.h>
-#include <bavarian/ecs.h>
+#include <bavarian3d/ecs_render.h>
 
+#include <bavarian/ecs.h>
+#include <bavarian/editor.h>
 #include <imgui.h>
 
 /* Forward declarations */
 extern BavEntityAdmin* editor_get_ecs_admin(BavEditor* editor);
+extern BavComponentId editor_get_transform_component_id(BavEditor* editor);
+extern BavComponentId editor_get_mesh_renderer_component_id(BavEditor* editor);
 
 static void draw_transform_component(BavEditor* editor, BavEntityAdmin* admin, BavEntity entity)
 {
-    BAV_UNUSED(editor);
-    BAV_UNUSED(admin);
-    BAV_UNUSED(entity);
+    BavComponentId transform_id = editor_get_transform_component_id(editor);
+
+    /* Check if entity has transform component */
+    if (!bav_entity_has_component(admin, entity, transform_id))
+        return;
 
     if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        /* Placeholder transform values */
-        static float position[3] = {0.0f, 0.0f, 0.0f};
-        static float rotation[3] = {0.0f, 0.0f, 0.0f};
-        static float scale[3] = {1.0f, 1.0f, 1.0f};
+        LocalTransform* transform =
+            (LocalTransform*)bav_entity_get_component(admin, entity, transform_id);
+        if (!transform)
+            return;
 
-        ImGui::DragFloat3("Position", position, 0.1f);
+        /* Position */
+        float position[3] = {transform->position.x, transform->position.y, transform->position.z};
+        if (ImGui::DragFloat3("Position", position, 0.1f))
+        {
+            transform->position.x = position[0];
+            transform->position.y = position[1];
+            transform->position.z = position[2];
+        }
+
+        /* Rotation (euler angles for editing) */
+        /* TODO: Convert quaternion to euler for display */
+        float rotation[3] = {0.0f, 0.0f, 0.0f};
         ImGui::DragFloat3("Rotation", rotation, 1.0f, -180.0f, 180.0f);
-        ImGui::DragFloat3("Scale", scale, 0.1f, 0.001f, 100.0f);
 
-        /* TODO: Actually read/write from entity's transform component */
+        /* Scale */
+        float scale[3] = {transform->scale.x, transform->scale.y, transform->scale.z};
+        if (ImGui::DragFloat3("Scale", scale, 0.1f, 0.001f, 100.0f))
+        {
+            transform->scale.x = scale[0];
+            transform->scale.y = scale[1];
+            transform->scale.z = scale[2];
+        }
     }
 }
 
@@ -100,25 +122,38 @@ void editor_inspector_panel_update(BavEditor* editor)
         ImGui::Text("Add Component");
         ImGui::Separator();
 
-        if (ImGui::MenuItem("Transform"))
+        BavComponentId transform_id = editor_get_transform_component_id(editor);
+        BavComponentId mesh_renderer_id = editor_get_mesh_renderer_component_id(editor);
+
+        bool has_transform = bav_entity_has_component(admin, selected, transform_id);
+        bool has_mesh_renderer = bav_entity_has_component(admin, selected, mesh_renderer_id);
+
+        if (!has_transform && ImGui::MenuItem("Transform"))
         {
-            /* TODO: Add transform component */
+            LocalTransform transform = local_transform_identity();
+            bav_entity_add_component(admin, selected, transform_id, &transform);
+            ImGui::CloseCurrentPopup();
         }
-        if (ImGui::MenuItem("Mesh Renderer"))
+        if (!has_mesh_renderer && ImGui::MenuItem("Mesh Renderer"))
         {
-            /* TODO: Add mesh renderer component */
+            MeshRenderer renderer = mesh_renderer_default();
+            bav_entity_add_component(admin, selected, mesh_renderer_id, &renderer);
+            ImGui::CloseCurrentPopup();
         }
         if (ImGui::MenuItem("Script"))
         {
             /* TODO: Add script component */
+            ImGui::CloseCurrentPopup();
         }
         if (ImGui::MenuItem("Rigidbody"))
         {
             /* TODO: Add rigidbody component */
+            ImGui::CloseCurrentPopup();
         }
         if (ImGui::MenuItem("Collider"))
         {
             /* TODO: Add collider component */
+            ImGui::CloseCurrentPopup();
         }
 
         ImGui::EndPopup();

@@ -6,11 +6,10 @@
  * Supports entity selection, creation, and deletion.
  */
 
-#include <bavarian/editor.h>
 #include <bavarian/ecs.h>
-
-#include <imgui.h>
+#include <bavarian/editor.h>
 #include <cstdio>
+#include <imgui.h>
 
 /* Forward declaration */
 extern BavEntityAdmin* editor_get_ecs_admin(BavEditor* editor);
@@ -89,27 +88,15 @@ void editor_hierarchy_panel_update(BavEditor* editor)
     ImGui::Separator();
 
     /* Entity list */
-    /* For now, iterate all entities - in real implementation we'd have
-     * a more efficient way to get the entity list */
     if (entity_count > 0)
     {
-        /* We need to query for all entities - use a simple approach */
-        /* Since we don't have a direct "get all entities" API, we'll
-         * iterate through indices checking validity */
-        for (u32 i = 1; i <= entity_count * 2 && i < 10000; i++)
-        {
-            BavEntity entity;
-            entity.index = i;
-            entity.generation = 0; /* Will be validated */
-            entity.flags = 0;
+        /* Get all live entities */
+        static BavEntity entities[1024];
+        u32 count = bav_entity_get_all(admin, entities, 1024);
 
-            /* Check if entity exists at this index */
-            /* This is a hack - proper implementation would have
-             * an entity iteration API */
-            if (bav_entity_valid(admin, entity))
-            {
-                draw_entity_node(editor, admin, entity);
-            }
+        for (u32 i = 0; i < count; i++)
+        {
+            draw_entity_node(editor, admin, entities[i]);
         }
     }
 

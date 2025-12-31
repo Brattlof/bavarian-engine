@@ -59,6 +59,13 @@ if(EXISTS ${IMGUI_DIR}/imgui.cpp)
             ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
         )
     endif()
+
+    # D3D12 backend for Windows
+    if(WIN32 AND BAV_ENABLE_D3D12)
+        target_sources(bavarian_editor_lib PRIVATE
+            ${IMGUI_DIR}/backends/imgui_impl_dx12.cpp
+        )
+    endif()
 endif()
 
 target_include_directories(bavarian_editor_lib PUBLIC

@@ -9,15 +9,20 @@
  * It never ships with games.
  */
 
-#include <bavarian/editor.h>
 #include <bavarian/ecs.h>
+#include <bavarian/editor.h>
 #include <bavarian/types.h>
-
 #include <imgui.h>
 #include <imgui_internal.h>
 
 #ifdef _WIN32
-#include <imgui_impl_win32.h>
+    #include <d3d12.h>
+    #include <dxgi1_4.h>
+    #include <imgui_impl_dx12.h>
+    #include <imgui_impl_win32.h>
+
+    #pragma comment(lib, "d3d12.lib")
+    #pragma comment(lib, "dxgi.lib")
 #endif
 
 #include <cstdlib>
@@ -57,6 +62,11 @@ struct ConsoleMessage
     char message[512];
 };
 
+/* D3D12 constants */
+#ifdef _WIN32
+static constexpr int NUM_BACK_BUFFERS = 2;
+#endif
+
 struct BavEditor
 {
     /* ImGui context */
@@ -66,6 +76,23 @@ struct BavEditor
     void* window_handle;
     u32 window_width;
     u32 window_height;
+
+#ifdef _WIN32
+    /* D3D12 state */
+    ID3D12Device* d3d_device;
+    ID3D12CommandQueue* command_queue;
+    ID3D12CommandAllocator* command_allocators[NUM_BACK_BUFFERS];
+    ID3D12GraphicsCommandList* command_list;
+    IDXGISwapChain3* swap_chain;
+    ID3D12DescriptorHeap* rtv_heap;
+    ID3D12DescriptorHeap* srv_heap;
+    ID3D12Resource* render_targets[NUM_BACK_BUFFERS];
+    ID3D12Fence* fence;
+    HANDLE fence_event;
+    UINT64 fence_values[NUM_BACK_BUFFERS];
+    UINT frame_index;
+    UINT rtv_descriptor_size;
+#endif
 
     /* ECS admin for scene editing */
     BavEntityAdmin* ecs_admin;
@@ -106,6 +133,168 @@ struct BavEditor
 };
 
 /* =============================================================================
+ * D3D12 Initialization Helpers
+ * ============================================================================= */
+
+#ifdef _WIN32
+static bool editor_init_d3d12(BavEditor* editor, HWND hwnd, u32 width, u32 height)
+{
+    /* Create DXGI factory */
+    IDXGIFactory4* factory = nullptr;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+        return false;
+
+    /* Create D3D12 device */
+    if (FAILED(
+            D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&editor->d3d_device))))
+    {
+        factory->Release();
+        return false;
+    }
+
+    /* Create command queue */
+    D3D12_COMMAND_QUEUE_DESC queue_desc = {};
+    queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    queue_desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+    if (FAILED(editor->d3d_device->CreateCommandQueue(&queue_desc,
+                                                      IID_PPV_ARGS(&editor->command_queue))))
+    {
+        editor->d3d_device->Release();
+        factory->Release();
+        return false;
+    }
+
+    /* Create swap chain */
+    DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {};
+    swap_chain_desc.BufferCount = NUM_BACK_BUFFERS;
+    swap_chain_desc.Width = width;
+    swap_chain_desc.Height = height;
+    swap_chain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swap_chain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    swap_chain_desc.SampleDesc.Count = 1;
+
+    IDXGISwapChain1* swap_chain1 = nullptr;
+    if (FAILED(factory->CreateSwapChainForHwnd(editor->command_queue, hwnd, &swap_chain_desc,
+                                               nullptr, nullptr, &swap_chain1)))
+    {
+        editor->command_queue->Release();
+        editor->d3d_device->Release();
+        factory->Release();
+        return false;
+    }
+
+    factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+    swap_chain1->QueryInterface(IID_PPV_ARGS(&editor->swap_chain));
+    swap_chain1->Release();
+    factory->Release();
+
+    editor->frame_index = editor->swap_chain->GetCurrentBackBufferIndex();
+
+    /* Create RTV descriptor heap */
+    D3D12_DESCRIPTOR_HEAP_DESC rtv_heap_desc = {};
+    rtv_heap_desc.NumDescriptors = NUM_BACK_BUFFERS;
+    rtv_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    rtv_heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    if (FAILED(editor->d3d_device->CreateDescriptorHeap(&rtv_heap_desc,
+                                                        IID_PPV_ARGS(&editor->rtv_heap))))
+        return false;
+
+    editor->rtv_descriptor_size =
+        editor->d3d_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+    /* Create SRV descriptor heap (for ImGui fonts) */
+    D3D12_DESCRIPTOR_HEAP_DESC srv_heap_desc = {};
+    srv_heap_desc.NumDescriptors = 1;
+    srv_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    srv_heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    if (FAILED(editor->d3d_device->CreateDescriptorHeap(&srv_heap_desc,
+                                                        IID_PPV_ARGS(&editor->srv_heap))))
+        return false;
+
+    /* Create render target views */
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv_handle = editor->rtv_heap->GetCPUDescriptorHandleForHeapStart();
+    for (UINT i = 0; i < NUM_BACK_BUFFERS; i++)
+    {
+        if (FAILED(editor->swap_chain->GetBuffer(i, IID_PPV_ARGS(&editor->render_targets[i]))))
+            return false;
+        editor->d3d_device->CreateRenderTargetView(editor->render_targets[i], nullptr, rtv_handle);
+        rtv_handle.ptr += editor->rtv_descriptor_size;
+    }
+
+    /* Create command allocators */
+    for (UINT i = 0; i < NUM_BACK_BUFFERS; i++)
+    {
+        if (FAILED(editor->d3d_device->CreateCommandAllocator(
+                D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&editor->command_allocators[i]))))
+            return false;
+        editor->fence_values[i] = 0;
+    }
+
+    /* Create command list */
+    if (FAILED(editor->d3d_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                     editor->command_allocators[0], nullptr,
+                                                     IID_PPV_ARGS(&editor->command_list))))
+        return false;
+    editor->command_list->Close();
+
+    /* Create fence */
+    if (FAILED(editor->d3d_device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
+                                               IID_PPV_ARGS(&editor->fence))))
+        return false;
+
+    editor->fence_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (!editor->fence_event)
+        return false;
+
+    return true;
+}
+
+static void editor_wait_for_gpu(BavEditor* editor)
+{
+    UINT64 fence_value = editor->fence_values[editor->frame_index];
+    editor->command_queue->Signal(editor->fence, fence_value);
+
+    if (editor->fence->GetCompletedValue() < fence_value)
+    {
+        editor->fence->SetEventOnCompletion(fence_value, editor->fence_event);
+        WaitForSingleObject(editor->fence_event, INFINITE);
+    }
+
+    editor->fence_values[editor->frame_index]++;
+}
+
+static void editor_cleanup_d3d12(BavEditor* editor)
+{
+    editor_wait_for_gpu(editor);
+
+    if (editor->fence_event)
+        CloseHandle(editor->fence_event);
+    if (editor->fence)
+        editor->fence->Release();
+    if (editor->command_list)
+        editor->command_list->Release();
+    for (UINT i = 0; i < NUM_BACK_BUFFERS; i++)
+    {
+        if (editor->command_allocators[i])
+            editor->command_allocators[i]->Release();
+        if (editor->render_targets[i])
+            editor->render_targets[i]->Release();
+    }
+    if (editor->srv_heap)
+        editor->srv_heap->Release();
+    if (editor->rtv_heap)
+        editor->rtv_heap->Release();
+    if (editor->swap_chain)
+        editor->swap_chain->Release();
+    if (editor->command_queue)
+        editor->command_queue->Release();
+    if (editor->d3d_device)
+        editor->d3d_device->Release();
+}
+#endif
+
+/* =============================================================================
  * Editor Lifecycle
  * ============================================================================= */
 
@@ -134,9 +323,40 @@ BavEditor* bav_editor_create(const BavEditorConfig* config)
     /* Initialize theme */
     editor_init_theme(config->dark_mode);
 
-    /* Initialize platform backend */
+    /* Initialize D3D12 */
 #ifdef _WIN32
+    if (!editor_init_d3d12(editor, (HWND)config->window_handle, config->window_width,
+                           config->window_height))
+    {
+        delete editor;
+        return nullptr;
+    }
+
+    /* Initialize platform backend */
     ImGui_ImplWin32_Init(config->window_handle);
+
+    /*
+     * Initialize D3D12 backend using the new API (ImGui docking branch).
+     * The backend needs a command queue to upload textures automatically.
+     */
+    ImGui_ImplDX12_InitInfo init_info = {};
+    init_info.Device = editor->d3d_device;
+    init_info.CommandQueue = editor->command_queue;
+    init_info.NumFramesInFlight = NUM_BACK_BUFFERS;
+    init_info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    init_info.DSVFormat = DXGI_FORMAT_UNKNOWN;
+    init_info.SrvDescriptorHeap = editor->srv_heap;
+    init_info.LegacySingleSrvCpuDescriptor = editor->srv_heap->GetCPUDescriptorHandleForHeapStart();
+    init_info.LegacySingleSrvGpuDescriptor = editor->srv_heap->GetGPUDescriptorHandleForHeapStart();
+
+    if (!ImGui_ImplDX12_Init(&init_info))
+    {
+        ImGui_ImplWin32_Shutdown();
+        editor_cleanup_d3d12(editor);
+        ImGui::DestroyContext(editor->imgui_ctx);
+        delete editor;
+        return nullptr;
+    }
 #endif
 
     /* Default panel visibility */
@@ -176,7 +396,9 @@ void bav_editor_destroy(BavEditor* editor)
 
     /* Cleanup ImGui */
 #ifdef _WIN32
+    ImGui_ImplDX12_Shutdown();
     ImGui_ImplWin32_Shutdown();
+    editor_cleanup_d3d12(editor);
 #endif
 
     ImGui::DestroyContext(editor->imgui_ctx);
@@ -205,7 +427,8 @@ static void editor_setup_dockspace(BavEditor* editor)
 
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
                                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
-                                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                    ImGuiWindowFlags_NoMove |
+                                    ImGuiWindowFlags_NoBringToFrontOnFocus |
                                     ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -216,7 +439,8 @@ static void editor_setup_dockspace(BavEditor* editor)
     ImGui::PopStyleVar(3);
 
     editor->dockspace_id = ImGui::GetID("MainDockSpace");
-    ImGui::DockSpace(editor->dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockSpace(editor->dockspace_id, ImVec2(0.0f, 0.0f),
+                     ImGuiDockNodeFlags_PassthruCentralNode);
 
     /* Setup default layout on first frame */
     if (editor->first_frame)
@@ -228,9 +452,12 @@ static void editor_setup_dockspace(BavEditor* editor)
         ImGui::DockBuilderSetNodeSize(editor->dockspace_id, viewport->WorkSize);
 
         ImGuiID dock_main = editor->dockspace_id;
-        ImGuiID dock_left = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, 0.2f, nullptr, &dock_main);
-        ImGuiID dock_right = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.25f, nullptr, &dock_main);
-        ImGuiID dock_bottom = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 0.25f, nullptr, &dock_main);
+        ImGuiID dock_left =
+            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, 0.2f, nullptr, &dock_main);
+        ImGuiID dock_right =
+            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.25f, nullptr, &dock_main);
+        ImGuiID dock_bottom =
+            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 0.25f, nullptr, &dock_main);
 
         ImGui::DockBuilderDockWindow("Hierarchy", dock_left);
         ImGui::DockBuilderDockWindow("Inspector", dock_right);
@@ -291,12 +518,15 @@ static void editor_menu_bar(BavEditor* editor)
 
         if (ImGui::BeginMenu("View"))
         {
-            ImGui::MenuItem("Hierarchy", nullptr, &editor->panel_visible[BAV_PANEL_SCENE_HIERARCHY]);
+            ImGui::MenuItem("Hierarchy", nullptr,
+                            &editor->panel_visible[BAV_PANEL_SCENE_HIERARCHY]);
             ImGui::MenuItem("Viewport", nullptr, &editor->panel_visible[BAV_PANEL_VIEWPORT]);
             ImGui::MenuItem("Inspector", nullptr, &editor->panel_visible[BAV_PANEL_INSPECTOR]);
             ImGui::MenuItem("Console", nullptr, &editor->panel_visible[BAV_PANEL_CONSOLE]);
-            ImGui::MenuItem("Asset Browser", nullptr, &editor->panel_visible[BAV_PANEL_ASSET_BROWSER]);
-            ImGui::MenuItem("ECS Inspector", nullptr, &editor->panel_visible[BAV_PANEL_ECS_INSPECTOR]);
+            ImGui::MenuItem("Asset Browser", nullptr,
+                            &editor->panel_visible[BAV_PANEL_ASSET_BROWSER]);
+            ImGui::MenuItem("ECS Inspector", nullptr,
+                            &editor->panel_visible[BAV_PANEL_ECS_INSPECTOR]);
             ImGui::MenuItem("Performance", nullptr, &editor->panel_visible[BAV_PANEL_PERFORMANCE]);
             ImGui::EndMenu();
         }
@@ -380,6 +610,7 @@ b8 bav_editor_update(BavEditor* editor, f32 delta_time)
 
     /* Start new ImGui frame */
 #ifdef _WIN32
+    ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
 #endif
     ImGui::NewFrame();
@@ -424,7 +655,63 @@ b8 bav_editor_update(BavEditor* editor, f32 delta_time)
     /* Render ImGui */
     ImGui::Render();
 
-    /* The actual rendering happens in the backend - we just prepared the draw data */
+#ifdef _WIN32
+    /* D3D12 rendering */
+    UINT back_buffer_idx = editor->swap_chain->GetCurrentBackBufferIndex();
+
+    /* Wait for previous frame to finish */
+    UINT64 fence_value = editor->fence_values[back_buffer_idx];
+    if (editor->fence->GetCompletedValue() < fence_value)
+    {
+        editor->fence->SetEventOnCompletion(fence_value, editor->fence_event);
+        WaitForSingleObject(editor->fence_event, INFINITE);
+    }
+
+    /* Reset command allocator and list */
+    editor->command_allocators[back_buffer_idx]->Reset();
+    editor->command_list->Reset(editor->command_allocators[back_buffer_idx], nullptr);
+
+    /* Transition render target to render state */
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = editor->render_targets[back_buffer_idx];
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    editor->command_list->ResourceBarrier(1, &barrier);
+
+    /* Clear render target */
+    const float clear_color[] = {0.1f, 0.1f, 0.1f, 1.0f};
+    D3D12_CPU_DESCRIPTOR_HANDLE rtv_handle = editor->rtv_heap->GetCPUDescriptorHandleForHeapStart();
+    rtv_handle.ptr += back_buffer_idx * editor->rtv_descriptor_size;
+    editor->command_list->ClearRenderTargetView(rtv_handle, clear_color, 0, nullptr);
+    editor->command_list->OMSetRenderTargets(1, &rtv_handle, FALSE, nullptr);
+
+    /* Set descriptor heaps */
+    ID3D12DescriptorHeap* heaps[] = {editor->srv_heap};
+    editor->command_list->SetDescriptorHeaps(1, heaps);
+
+    /* Render ImGui */
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), editor->command_list);
+
+    /* Transition render target to present state */
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+    editor->command_list->ResourceBarrier(1, &barrier);
+
+    /* Close and execute command list */
+    editor->command_list->Close();
+    ID3D12CommandList* cmd_lists[] = {editor->command_list};
+    editor->command_queue->ExecuteCommandLists(1, cmd_lists);
+
+    /* Present */
+    editor->swap_chain->Present(1, 0);
+
+    /* Signal fence */
+    editor->fence_values[back_buffer_idx] = editor->fence_values[editor->frame_index] + 1;
+    editor->command_queue->Signal(editor->fence, editor->fence_values[back_buffer_idx]);
+    editor->frame_index = back_buffer_idx;
+#endif
 
     return true;
 }
